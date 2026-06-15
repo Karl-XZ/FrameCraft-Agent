@@ -1,0 +1,25 @@
+{
+  "jianying": {
+    "app_exe": "F:\\JianyingPro\\JianyingPro.exe",
+    "app_version": "9.7.1.13726",
+    "data_dir": "C:\\Users\\ZHOU\\AppData\\Local\\JianyingPro",
+    "draft_dir": "C:\\Users\\ZHOU\\AppData\\Local\\JianyingPro\\User Data\\Projects\\com.lveditor.draft",
+    "is_capcut_env": false
+  },
+  "capcut": {
+    "installed": false,
+    "draft_dir_hint": "C:\\Users\\<user>\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft"
+  },
+  "tools": {
+    "node_exe": "C:\\Users\\ZHOU\\AppData\\Local\\Programs\\node-v22.20.0-win-x64\\node.exe",
+    "node_version": "22.20.0",
+    "node_min_version": "22.19.0",
+    "openclaw_version": "2026.6.6",
+    "hyperframes_version": "0.6.99",
+    "ffmpeg": "ffmpeg",
+    "hyperframes_cli": "npx hyperframes",
+    "chromium_exe": "chrome/win64-149.0.7827.115/chrome-win64/chrome.exe",
+    "vectcut_api_dir": "vendor/VectCutAPI",
+    "vectcut_api_port": 9001
+  }
+}

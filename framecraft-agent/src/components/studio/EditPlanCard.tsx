@@ -1,0 +1,92 @@
+import React from 'react';
+import { Sparkles, Clock, Play, Music, Layers } from 'lucide-react';
+import GlassCard from '../ui/GlassCard';
+import GradientButton from '../ui/GradientButton';
+import { useProjectStore } from '../../store/projectStore';
+import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
+
+export default function EditPlanCard() {
+  const { editPlan } = useProjectStore();
+  const { startGenerate } = useStudioWorkflow();
+
+  if (!editPlan) {
+    return (
+      <div className="flex items-center justify-center h-full text-text-muted text-sm">
+        剪辑方案生成中...
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-5 h-full justify-center">
+      <GlassCard className="rounded-2xl p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-text-main flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary-light" />
+            剪辑方案
+          </h3>
+          <span className="px-3 py-1 rounded-full bg-primary/15 text-primary-light text-xs font-semibold border border-primary/20">
+            AI 推荐
+          </span>
+        </div>
+
+        <div className="flex gap-4 flex-wrap">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/8">
+            <Play className="w-3.5 h-3.5 text-secondary" />
+            <span className="text-xs text-text-secondary">{editPlan.video_concept}</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/8">
+            <Clock className="w-3.5 h-3.5 text-accent" />
+            <span className="text-xs text-text-secondary">预估 {editPlan.target_duration} 秒</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/8">
+            <Music className="w-3.5 h-3.5 text-warning" />
+            <span className="text-xs text-text-secondary">{editPlan.bgm_note}</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-primary-light uppercase tracking-wider">Opening Hook</span>
+          <div className="p-3 rounded-lg bg-primary/8 border border-primary/15">
+            <p className="text-sm text-text-main font-medium italic leading-relaxed">
+              "{editPlan.hook}"
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-secondary uppercase tracking-wider">字幕风格</span>
+          <p className="text-sm text-text-secondary">{editPlan.subtitle_style}</p>
+        </div>
+
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-accent uppercase tracking-wider flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5" />
+            B-roll 插入计划
+          </span>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {(editPlan.broll_plan || []).map((item, i) => (
+              <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-white/4 border border-white/6">
+                <span className="text-xs font-mono text-secondary w-12 flex-shrink-0">
+                  {typeof item.time === 'number' ? `${item.time.toFixed(0)}s` : item.time}
+                </span>
+                <span className="text-xs text-text-secondary flex-1">{item.text}</span>
+                <span className="text-xs text-text-muted">{item.source}</span>
+              </div>
+            ))}
+            {!editPlan.broll_plan?.length && (
+              <p className="text-xs text-text-muted">暂无 B-roll 插入，将使用纯口播剪辑</p>
+            )}
+          </div>
+        </div>
+      </GlassCard>
+
+      <div className="flex gap-3">
+        <GradientButton size="lg" className="flex-1 rounded-xl" onClick={() => void startGenerate()}>
+          <Sparkles className="w-4 h-4" />
+          确认生成
+        </GradientButton>
+      </div>
+    </div>
+  );
+}

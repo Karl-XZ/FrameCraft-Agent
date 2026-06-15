@@ -4,8 +4,8 @@ import {
   formatDuration,
   formatSize,
   mapAssetType,
-} from '../../api/client';
-import { useProjectStore, type Asset } from '../../store/projectStore';
+} from '../api/client';
+import { useProjectStore, type Asset } from '../store/projectStore';
 
 export function useStudioWorkflow() {
   const store = useProjectStore();

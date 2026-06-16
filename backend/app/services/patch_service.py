@@ -4,11 +4,16 @@ from __future__ import annotations
 import uuid
 from copy import deepcopy
 
+from pathlib import Path
+
 from sqlalchemy.orm import Session
 
-from .agent_orchestrator import run_text_json
+from ..config import OUTPUTS_DIR
+from ..utils import read_json, write_json
+from .agent_orchestrator import run_text_json_with_meta
 from .llm import llm_available
 from .templates import resolve_template
+from .timeline_builder import save_timeline
 
 PATCH_OPS_PROMPT = """支持的 patch.operations（每项含 op 字段）：
 - update_title(text) 改 Hook 标题
@@ -273,6 +278,31 @@ def validate_patch(timeline: dict, patch: dict) -> tuple[bool, list[str]]:
     return (len(errors) == 0, errors)
 
 
+def prepare_patched_version(db: Session, project_id: str, patch: dict) -> tuple[str, Path]:
+    """服务端先落地 patch：校验、应用并写入新版本 unified_timeline.json。"""
+    from ..models import Project, ProjectVersion
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.current_version_id:
+        raise ValueError("项目或当前版本不存在")
+    base = db.query(ProjectVersion).filter(ProjectVersion.id == project.current_version_id).first()
+    if not base or not base.timeline_json_path:
+        raise ValueError("当前版本缺少 unified_timeline.json")
+
+    timeline = read_json(Path(base.timeline_json_path))
+    ok, errors = validate_patch(timeline, patch)
+    if not ok:
+        raise ValueError("patch 校验失败：" + "；".join(errors))
+
+    patched = apply_patch(timeline, patch)
+    version_id = f"ver_{uuid.uuid4().hex[:12]}"
+    version_dir = OUTPUTS_DIR / project_id / version_id
+    version_dir.mkdir(parents=True, exist_ok=True)
+    save_timeline(version_dir / "unified_timeline.json", patched)
+    write_json(version_dir / "applied_patch.json", patch)
+    return version_id, version_dir
+
+
 def build_patch_from_message(message: str, timeline: dict, db: Session | None = None) -> dict:
     """由 LLM 把自然语言转成 patch（仅由 OpenClaw 通过 apply_patch 工具调用，禁止 API 直调）。"""
     empty = {"patch_id": "patch_auto", "description": message, "operations": []}
@@ -293,8 +323,16 @@ def build_patch_from_message(message: str, timeline: dict, db: Session | None = 
         f"用户消息：{message}\n"
         f"可用字幕 id：{subtitle_ids}\n可用素材 id：{asset_ids}\n可用场景：{scene_ids}"
     )
-    plan = run_text_json(db, system, user, empty)
+    llm_result = run_text_json_with_meta(db, system, user, empty)
+    plan = llm_result.data
     plan.setdefault("patch_id", "patch_auto")
     plan.setdefault("description", message)
     plan.setdefault("operations", [])
+    if not llm_result.ok:
+        plan["llm_status"] = llm_result.source
+        plan["llm_error"] = llm_result.error
+        if not plan.get("operations"):
+            plan["error"] = plan.get("error") or (
+                f"大模型未能生成 patch：{llm_result.error or '未配置 API Key'}"
+            )
     return plan

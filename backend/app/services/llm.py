@@ -2,16 +2,38 @@ from __future__ import annotations
 
 import base64
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
-from ..utils import get_model_settings, read_json
+from ..utils import get_model_settings
+
+
+@dataclass
+class LlmCallResult:
+    data: dict
+    ok: bool
+    source: str  # llm | fallback_rules | unconfigured
+    error: str | None = None
+
+
+@dataclass
+class VisionCallResult:
+    text: str
+    vision_status: str  # vlm | degraded_basic | unavailable
+    error: str | None = None
+
+
+@dataclass
+class OcrCallResult:
+    text: str
+    ocr_status: str  # vlm | unavailable | failed
+    error: str | None = None
 
 
 def llm_available(db: Session) -> bool:
-    """是否已配置可用的大模型 API Key（决定能否启用 Agent 对话修改）。"""
     return bool(get_model_settings(db).get("api_key"))
 
 
@@ -25,10 +47,15 @@ def _client(db: Session) -> OpenAI | None:
     return OpenAI(**kwargs)
 
 
-def llm_json(db: Session, system: str, user: str, fallback: dict) -> dict:
+def llm_json_with_meta(db: Session, system: str, user: str, fallback: dict) -> LlmCallResult:
     client = _client(db)
     if not client:
-        return fallback
+        return LlmCallResult(
+            data=fallback,
+            ok=False,
+            source="unconfigured",
+            error="未配置大模型 API Key，已使用规则方案",
+        )
     cfg = get_model_settings(db)
     try:
         resp = client.chat.completions.create(
@@ -41,13 +68,21 @@ def llm_json(db: Session, system: str, user: str, fallback: dict) -> dict:
             temperature=0.4,
         )
         content = resp.choices[0].message.content or "{}"
-        return json.loads(content)
-    except Exception:
-        return fallback
+        return LlmCallResult(data=json.loads(content), ok=True, source="llm")
+    except Exception as exc:
+        return LlmCallResult(
+            data=fallback,
+            ok=False,
+            source="fallback_rules",
+            error=str(exc)[:500],
+        )
+
+
+def llm_json(db: Session, system: str, user: str, fallback: dict) -> dict:
+    return llm_json_with_meta(db, system, user, fallback).data
 
 
 def llm_chat(db: Session, system: str, user: str, fallback: str) -> str:
-    """普通文本对话（非 JSON patch）。"""
     client = _client(db)
     if not client:
         return fallback
@@ -74,13 +109,18 @@ def _encode_image(image_path: Path) -> tuple[str, str]:
     return data, mime
 
 
-def vision_describe(db: Session, image_path: Path, user_note: str = "") -> str:
+def vision_describe_with_meta(db: Session, image_path: Path, user_note: str = "") -> VisionCallResult:
+    from .media import describe_image_basic
+
     client = _client(db)
     if not client:
-        from .media import describe_image_basic
-
         base = describe_image_basic(image_path)
-        return f"{base}。用户备注：{user_note}" if user_note else base
+        text = f"{base}。用户备注：{user_note}" if user_note else base
+        return VisionCallResult(
+            text=text,
+            vision_status="unavailable",
+            error="未配置视觉模型 API Key，仅为基础文件描述",
+        )
     cfg = get_model_settings(db)
     data, mime = _encode_image(image_path)
     try:
@@ -100,24 +140,45 @@ def vision_describe(db: Session, image_path: Path, user_note: str = "") -> str:
             ],
             max_tokens=300,
         )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception:
-        from .media import describe_image_basic
+        text = (resp.choices[0].message.content or "").strip()
+        if not text:
+            base = describe_image_basic(image_path)
+            return VisionCallResult(
+                text=base,
+                vision_status="degraded_basic",
+                error="视觉模型返回空内容，已降级为基础描述",
+            )
+        return VisionCallResult(text=text, vision_status="vlm")
+    except Exception as exc:
+        base = describe_image_basic(image_path)
+        return VisionCallResult(
+            text=base,
+            vision_status="degraded_basic",
+            error=str(exc)[:500],
+        )
 
-        return describe_image_basic(image_path)
+
+def vision_describe(db: Session, image_path: Path, user_note: str = "") -> str:
+    return vision_describe_with_meta(db, image_path, user_note).text
 
 
-def vision_describe_frames(db: Session, frame_paths: list[Path], user_note: str = "") -> str:
-    """对视频抽取的多帧做综合理解（需求 §6.3.2）：场景、人物、物体、界面、文字。"""
+def vision_describe_frames_with_meta(
+    db: Session, frame_paths: list[Path], user_note: str = ""
+) -> VisionCallResult:
+    from .media import describe_image_basic
+
     frames = [p for p in frame_paths if p and p.exists()][:6]
     if not frames:
-        return ""
+        return VisionCallResult(text="", vision_status="unavailable", error="无可用关键帧")
     client = _client(db)
     if not client:
-        from .media import describe_image_basic
-
         base = describe_image_basic(frames[0])
-        return f"视频素材，关键帧 {len(frame_paths)} 张；{base}。用户备注：{user_note}" if user_note else base
+        text = f"视频素材，关键帧 {len(frame_paths)} 张；{base}。用户备注：{user_note}" if user_note else base
+        return VisionCallResult(
+            text=text,
+            vision_status="unavailable",
+            error="未配置视觉模型 API Key，仅为基础文件描述",
+        )
     cfg = get_model_settings(db)
     content: list[dict] = [
         {
@@ -138,18 +199,32 @@ def vision_describe_frames(db: Session, frame_paths: list[Path], user_note: str 
             messages=[{"role": "user", "content": content}],
             max_tokens=400,
         )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception:
-        from .media import describe_image_basic
+        text = (resp.choices[0].message.content or "").strip()
+        if not text:
+            base = describe_image_basic(frames[0])
+            return VisionCallResult(
+                text=base,
+                vision_status="degraded_basic",
+                error="视觉模型返回空内容，已降级为基础描述",
+            )
+        return VisionCallResult(text=text, vision_status="vlm")
+    except Exception as exc:
+        base = describe_image_basic(frames[0])
+        return VisionCallResult(
+            text=base,
+            vision_status="degraded_basic",
+            error=str(exc)[:500],
+        )
 
-        return describe_image_basic(frames[0])
+
+def vision_describe_frames(db: Session, frame_paths: list[Path], user_note: str = "") -> str:
+    return vision_describe_frames_with_meta(db, frame_paths, user_note).text
 
 
-def ocr_image(db: Session, image_path: Path) -> str:
-    """提取图片中的文字（需求 §6.3.3 OCR）。优先 VLM，失败返回空串。"""
+def ocr_image_with_meta(db: Session, image_path: Path) -> OcrCallResult:
     client = _client(db)
     if not client:
-        return ""
+        return OcrCallResult(text="", ocr_status="unavailable", error="未配置视觉模型，跳过 OCR")
     cfg = get_model_settings(db)
     data, mime = _encode_image(image_path)
     try:
@@ -170,13 +245,18 @@ def ocr_image(db: Session, image_path: Path) -> str:
             max_tokens=300,
         )
         text = (resp.choices[0].message.content or "").strip()
-        return "" if text in {"空", "无", "（空）", "(empty)"} else text
-    except Exception:
-        return ""
+        if text in {"空", "无", "（空）", "(empty)"}:
+            text = ""
+        return OcrCallResult(text=text, ocr_status="vlm")
+    except Exception as exc:
+        return OcrCallResult(text="", ocr_status="failed", error=str(exc)[:500])
+
+
+def ocr_image(db: Session, image_path: Path) -> str:
+    return ocr_image_with_meta(db, image_path).text
 
 
 def classify_image_usage(file_name: str, user_label: str, ocr_text: str, summary: str) -> list[str]:
-    """根据文件名/标签/OCR/描述判断图片用途（需求 §6.3.3）。"""
     blob = f"{file_name} {user_label} {ocr_text} {summary}".lower()
     usages: list[str] = []
     if "logo" in blob:
@@ -191,6 +271,5 @@ def classify_image_usage(file_name: str, user_label: str, ocr_text: str, summary
         usages.append("explainer_card")
     if not usages:
         usages = ["illustration"]
-    # 去重保序
     seen: set[str] = set()
     return [u for u in usages if not (u in seen or seen.add(u))]

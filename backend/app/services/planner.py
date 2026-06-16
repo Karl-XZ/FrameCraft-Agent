@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..config import OUTPUTS_DIR
 from ..utils import write_json
-from .agent_orchestrator import run_text_json
+from .agent_orchestrator import run_text_json_with_meta
 from .templates import feature_on, resolve_template
 
 FILLER_WORDS = ("嗯", "啊", "呃", "那个", "就是说", "然后呢", "um", "uh")
@@ -296,6 +296,7 @@ def plan_edit(
     strategy: str = "complete",
     platform: str = "douyin",
     output_language: str = "zh",
+    strategy_draft: dict | None = None,
     on_step=None,
 ) -> dict:
     def _step(label: str, progress: float) -> None:
@@ -354,8 +355,59 @@ def plan_edit(
         f"素材与转录 manifest（节选）：{_compact_manifest(manifest)}\n"
         f"当前规则方案：{fallback}"
     )
-    _step("大模型润色文案", 96)
-    plan = run_text_json(db, system, user, fallback)
+    # Agent-first：先由 Agent 产出策略草案，planner 仅负责结构化落盘与安全修正。
+    if strategy_draft is not None:
+        _step("结构化落盘策略草案", 96)
+        plan = dict(fallback)
+        for key in ("video_concept", "hook", "subtitle_style", "bgm_note", "cover_title"):
+            if isinstance(strategy_draft.get(key), str) and strategy_draft.get(key):
+                plan[key] = strategy_draft[key]
+        pub = strategy_draft.get("publish")
+        if isinstance(pub, dict):
+            plan["publish"] = {
+                "title": str(pub.get("title") or plan["publish"].get("title") or ""),
+                "description": str(pub.get("description") or plan["publish"].get("description") or ""),
+                "tags": pub.get("tags") if isinstance(pub.get("tags"), list) else plan["publish"].get("tags") or [],
+            }
+        tr = strategy_draft.get("transition")
+        if isinstance(tr, dict):
+            style = str(tr.get("style") or "crossfade").strip().lower()
+            if style != "crossfade":
+                style = "crossfade"
+            try:
+                opacity = float(tr.get("opacity", 0.22))
+            except (TypeError, ValueError):
+                opacity = 0.22
+            try:
+                duration = float(tr.get("duration", 0.18))
+            except (TypeError, ValueError):
+                duration = 0.18
+            plan["transition"] = {
+                "style": style,
+                "opacity": max(0.0, min(0.8, opacity)),
+                "duration": max(0.05, min(0.8, duration)),
+            }
+        plan["meta"] = {
+            **(plan.get("meta") or {}),
+            "llm_status": "agent_strategy_draft",
+            "llm_error": None,
+            "llm_note": "已使用 Agent 策略草案并结构化落盘。",
+        }
+    else:
+        _step("大模型润色文案", 96)
+        llm_result = run_text_json_with_meta(db, system, user, fallback)
+        plan = llm_result.data
+        plan_meta = {
+            "llm_status": "ok" if llm_result.ok and llm_result.source == "llm" else llm_result.source,
+            "llm_error": llm_result.error,
+            "llm_note": None,
+        }
+        if not llm_result.ok:
+            if llm_result.source == "unconfigured":
+                plan_meta["llm_note"] = "未配置大模型 API Key，剪辑方案文案为规则生成，未经 LLM 润色。"
+            else:
+                plan_meta["llm_note"] = f"大模型润色失败，已使用规则方案。原因：{llm_result.error or '未知'}"
+        plan["meta"] = {**(plan.get("meta") or {}), **plan_meta}
 
     # 保护关键结构：LLM 不得破坏 scenes 时间线与 words（Qwen 等模型偶发混入字符串项）
     raw_scenes = plan.get("scenes")
@@ -381,6 +433,7 @@ def plan_edit(
     # 模板与 graphics 为结构化规范，强制采用规则结果，避免 LLM 漂移
     plan["template"] = fallback["template"]
     plan["graphics"] = graphics
+    plan.setdefault("transition", {"style": "crossfade", "opacity": 0.22, "duration": 0.18})
 
     _step("保存剪辑方案", 99)
     out = OUTPUTS_DIR / project_id / "analysis" / "edit_plan.json"

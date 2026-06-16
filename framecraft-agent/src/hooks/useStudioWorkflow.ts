@@ -37,6 +37,8 @@ export function useStudioWorkflow() {
       note: a.user_note,
       status: a.analysis_status === 'completed' ? '分析完成' : a.analysis_status === 'transcribed' ? '已转录' : '已上传',
       thumbnail: a.thumbnail_url ? api.fileUrl(a.thumbnail_url) : undefined,
+      mustUse: a.must_use,
+      priority: a.priority,
     }));
     store.setAssets(mapped);
   }, [store]);
@@ -126,6 +128,7 @@ export function useStudioWorkflow() {
           store.setCurrentAnalyzeTask(job.current_step || '处理中');
           if (job.completed_steps) store.setAnalyzeCompletedSteps(job.completed_steps);
           if (job.logs) store.setAnalyzeLogs(job.logs);
+          if (job.warnings?.length) store.setJobWarnings(job.warnings);
           if (typeof job.plan_progress === 'number') store.setPlanProgress(job.plan_progress);
           store.setPlanSubstep(job.plan_substep ?? null);
         }
@@ -155,6 +158,7 @@ export function useStudioWorkflow() {
     store.setOverallProgress(0);
     store.setAnalyzeCompletedSteps([]);
     store.setAnalyzeLogs([]);
+    store.setJobWarnings([]);
     store.setPlanProgress(0);
     store.setPlanSubstep(null);
     const job = await api.analyze(projectId);

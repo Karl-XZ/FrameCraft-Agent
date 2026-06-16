@@ -1,3 +1,7 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,8 +11,10 @@ from sqlalchemy import inspect, text
 from .config import OUTPUTS_DIR, UPLOADS_DIR
 from .database import Base, SessionLocal, engine
 from .routers import api, projects
-from .services.openclaw_runtime import openclaw_available
+from .services.openclaw_runtime import GATEWAY_PORT, gateway_manager, install_gateway_exit_hooks, openclaw_available
 from .utils import seed_test_llm_defaults
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
@@ -49,7 +55,25 @@ def _seed_defaults() -> None:
 
 _seed_defaults()
 
-app = FastAPI(title="FrameCraft Agent API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动时拉起 OpenClaw Gateway 常驻进程，关闭时终止。"""
+    install_gateway_exit_hooks()
+    if openclaw_available():
+        try:
+            logger.info("[Startup] 启动 OpenClaw Gateway 常驻进程...")
+            await asyncio.get_event_loop().run_in_executor(None, gateway_manager.start)
+            logger.info("[Startup] OpenClaw Gateway 已就绪")
+        except Exception as exc:
+            logger.warning("[Startup] Gateway 启动失败（任务将 fallback --local）: %s", exc)
+    else:
+        logger.warning("[Startup] OpenClaw 未安装，跳过 Gateway 启动")
+    yield
+    gateway_manager.stop()
+    logger.info("[Shutdown] OpenClaw Gateway 已关闭")
+
+app = FastAPI(title="FrameCraft Agent API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,10 +90,13 @@ app.include_router(api.router)
 @app.get("/api/health")
 def health():
     oc = openclaw_available()
+    gw = gateway_manager.is_ready()
     return {
         "status": "ok",
         "orchestrator": "openclaw",
         "openclaw": oc,
+        "gateway": gw,
+        "gateway_url": f"ws://127.0.0.1:{GATEWAY_PORT}" if gw else None,
         "chat_engine": "openclaw-agent",
         "pipeline": "agent-only",
         "build": "2026-06-16-openclaw",

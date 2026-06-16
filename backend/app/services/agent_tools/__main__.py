@@ -60,12 +60,15 @@ def cmd_read_state(args: argparse.Namespace) -> None:
     state_path = ws / "STATE.json"
     state = read_json(state_path) if state_path.exists() else {}
     analysis = OUTPUTS_DIR / pid / "analysis"
+    manifest = read_json(analysis / "asset_manifest.json") if (analysis / "asset_manifest.json").exists() else {}
     _out({
         "ok": True,
         "state": state,
         "analysis_files": [p.name for p in analysis.iterdir()] if analysis.exists() else [],
         "has_manifest": (analysis / "asset_manifest.json").exists(),
         "has_edit_plan": (analysis / "edit_plan.json").exists(),
+        "assets_with_user_notes": state.get("assets_with_user_notes") or [],
+        "manifest_assets": manifest.get("assets") if isinstance(manifest, dict) else [],
     })
 
 
@@ -122,9 +125,13 @@ def cmd_suggest_edit_plan(args: argparse.Namespace) -> None:
         def on_plan_substep(substep: str, progress: float):
             update_job_progress(progress, f"生成剪辑方案 · {substep}", project_status=ProjectStatus.PLANNING.value)
 
+        strategy_draft = None
+        if args.draft_file:
+            strategy_draft = read_json(Path(args.draft_file))
         plan = plan_edit(
             db, pid, manifest, project.target_duration, project.target_style,
             args.strategy, args.platform, project.output_language or "zh",
+            strategy_draft=strategy_draft,
             on_step=on_plan_substep,
         )
         _out({"ok": True, "path": str(OUTPUTS_DIR / pid / "analysis" / "edit_plan.json"), "scene_count": len(plan.get("scenes", []))})
@@ -157,35 +164,42 @@ def cmd_build_timeline(args: argparse.Namespace) -> None:
         db.close()
 
 
-def cmd_list_workflows(args: argparse.Namespace) -> None:
-    from app.services.talking_head_workflow_service import _load_registry, workflow_label
+def cmd_build_hyperframes(args: argparse.Namespace) -> None:
+    """由 unified_timeline.json 直接生成 HyperFrames 工程（预览与草稿同源）。"""
+    from app.services.hyperframes_service import generate_hyperframes_project
+    from .progress import update_job_progress
 
-    reg = _load_registry()
-    workflows = reg.get("workflows") or {}
-    items = [{"id": k, "label": workflow_label(k)} for k in workflows]
-    _out({"ok": True, "workflows": items})
+    version_dir = Path(args.version_dir)
+    timeline_path = version_dir / "unified_timeline.json"
+    if not timeline_path.exists():
+        _out({"ok": False, "error": "unified_timeline.json 不存在，请先 build_timeline"}, 1)
+    timeline = read_json(timeline_path)
+    update_job_progress(40, "生成 HyperFrames 工程", project_status=ProjectStatus.RENDERING.value)
+    hf_dir = generate_hyperframes_project(timeline, version_dir)
+    _out({"ok": True, "hyperframes_dir": str(hf_dir)})
+
+
+def cmd_list_workflows(args: argparse.Namespace) -> None:
+    _out(
+        {
+            "ok": False,
+            "error": "list_workflows 已禁用。请使用 build_hyperframes 从 unified_timeline 生成 HyperFrames 工程。",
+        },
+        1,
+    )
 
 
 def cmd_workflow_build(args: argparse.Namespace) -> None:
-    from app.services.talking_head_workflow_service import (
-        prepare_workspace,
-        run_build,
-        workflow_label,
+    _out(
+        {
+            "ok": False,
+            "error": (
+                "workflow_build 已禁用。成片必须由 Agent 通过 build_hyperframes "
+                "从 unified_timeline.json 设计并渲染，禁止预置口播模板旁路。"
+            ),
+        },
+        1,
     )
-    from .progress import update_job_progress
-
-    pid = _project_id()
-    version_dir = Path(args.version_dir)
-    timeline = read_json(version_dir / "unified_timeline.json")
-    manifest = read_json(OUTPUTS_DIR / pid / "analysis" / "asset_manifest.json")
-    wf = args.workflow_id
-    update_job_progress(40, f"口播工作流 build · {workflow_label(wf)}", project_status=ProjectStatus.RENDERING.value)
-    prepare_workspace(version_dir, wf, timeline, manifest)
-    hf_dir = run_build(version_dir, wf)
-    timeline.setdefault("meta", {})["workflow_id"] = wf
-    timeline["meta"]["workflow_label"] = workflow_label(wf)
-    write_json(version_dir / "unified_timeline.json", timeline)
-    _out({"ok": True, "workflow_id": wf, "hyperframes_dir": str(hf_dir)})
 
 
 def cmd_render_preview(args: argparse.Namespace) -> None:
@@ -284,6 +298,7 @@ def cmd_finalize_version(args: argparse.Namespace) -> None:
             zip_hyperframes(hf_dir, hf_zip)
 
         draft_zip = version_dir / "draft" / "draft.zip"
+        # 剪映草稿由服务端在 Agent 完成后自动 export_draft，此处不强制 Agent 产出
         version_num = db.query(ProjectVersion).filter(ProjectVersion.project_id == pid).count() + 1
         version = ProjectVersion(
             id=version_id,
@@ -400,6 +415,7 @@ def main() -> None:
     p = sub.add_parser("suggest_edit_plan")
     p.add_argument("--strategy", default="complete")
     p.add_argument("--platform", default="douyin")
+    p.add_argument("--draft-file")
     p.set_defaults(func=cmd_suggest_edit_plan)
 
     p = sub.add_parser("build_timeline")
@@ -407,6 +423,10 @@ def main() -> None:
     p.add_argument("--resolution", default="1080p")
     p.add_argument("--fps", type=int, default=30)
     p.set_defaults(func=cmd_build_timeline)
+
+    p = sub.add_parser("build_hyperframes")
+    p.add_argument("--version-dir", required=True)
+    p.set_defaults(func=cmd_build_hyperframes)
 
     p = sub.add_parser("list_workflows")
     p.set_defaults(func=cmd_list_workflows)

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, ToggleLeft, ToggleRight } from 'lucide-react';
+import { AlertTriangle, ToggleRight } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 
 export default function DemoModeBanner() {

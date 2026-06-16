@@ -152,20 +152,9 @@ def _resolve_transcript(timeline: dict, manifest: dict, talk_src: Path, ws_input
                 runtime_segs.append({"words": words, "text": seg.get("text", "")})
         if runtime_segs:
             return {"segments": runtime_segs}
-    except Exception:
-        pass
-
-    demo = Path(r"C:\hf_demo\projects\nov26-short\assets\transcript.json")
-    if demo.exists():
-        data = json.loads(demo.read_text(encoding="utf-8"))
-        demo_segs = [
-            {"words": s.get("words", []), "text": s.get("text", "")}
-            for s in data.get("segments", [])
-            if s.get("words")
-        ]
-        if demo_segs:
-            return {"segments": demo_segs}
-    return transcript
+        raise RuntimeError("口播转录结果无逐词时间戳，无法生成字幕")
+    except Exception as exc:
+        raise RuntimeError(f"口播转录失败，无法生成 HyperFrames 字幕：{exc}") from exc
 
 
 def _ffmpeg(args: list[str]) -> None:
@@ -274,7 +263,6 @@ def _student_kit_valid(p: Path) -> bool:
 
 def _student_kit_root() -> Path:
     candidates = [
-        Path(r"C:\hf_demo\student-kit"),
         ROOT / "_hf_demo" / "hyperframes-student-kit",
         ROOT / "vendor" / "hyperframes-student-kit",
         STUDENT_KIT_DIR,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileVideo, Image, Music, Hexagon, MoreHorizontal } from 'lucide-react';
+import { FileVideo, Image, Music, Hexagon } from 'lucide-react';
 import Badge from '../ui/Badge';
 import { Asset } from '../../store/projectStore';
 

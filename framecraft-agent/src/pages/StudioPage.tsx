@@ -15,8 +15,9 @@ export default function StudioPage() {
       return;
     }
     const step = params.get('step');
-    if (step && ['upload', 'analyze', 'plan', 'generate', 'result'].includes(step)) {
-      setStep(step as any);
+    const validSteps = ['upload', 'analyze', 'plan', 'generate', 'result'] as const;
+    if (step && validSteps.includes(step as typeof validSteps[number])) {
+      setStep(step as typeof validSteps[number]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

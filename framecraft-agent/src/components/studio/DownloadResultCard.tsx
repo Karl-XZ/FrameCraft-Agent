@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, FileVideo, Layers, Star } from 'lucide-react';
+import { Download } from 'lucide-react';
 import Badge from '../ui/Badge';
 
 interface DownloadResultCardProps {

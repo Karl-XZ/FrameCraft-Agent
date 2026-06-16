@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, Play, FileVideo, Zap } from 'lucide-react';
+import { FileVideo, Zap } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 
 export default function BottomStatusBar() {

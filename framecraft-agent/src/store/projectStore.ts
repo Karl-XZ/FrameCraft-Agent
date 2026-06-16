@@ -13,6 +13,8 @@ export interface Asset {
   note: string;
   status: '已转录' | '待分析' | '已上传' | '分析完成';
   thumbnail?: string;
+  mustUse: boolean;
+  priority: number;
 }
 
 export interface ChatMessage {
@@ -48,6 +50,7 @@ interface ProjectState {
   currentAnalyzeTask: string;
   analyzeCompletedSteps: string[];
   analyzeLogs: string[];
+  jobWarnings: Array<{ code?: string; message: string; asset_id?: string }>;
   planProgress: number;
   planSubstep: string | null;
   generateHyperFramesProgress: number;
@@ -88,6 +91,7 @@ interface ProjectState {
   setCurrentAnalyzeTask: (v: string) => void;
   setAnalyzeCompletedSteps: (v: string[]) => void;
   setAnalyzeLogs: (v: string[]) => void;
+  setJobWarnings: (v: Array<{ code?: string; message: string; asset_id?: string }>) => void;
   setPlanProgress: (v: number) => void;
   setPlanSubstep: (v: string | null) => void;
   setGenerateHyperFramesProgress: (v: number) => void;
@@ -128,6 +132,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   currentAnalyzeTask: '等待开始',
   analyzeCompletedSteps: [],
   analyzeLogs: [],
+  jobWarnings: [] as Array<{ code?: string; message: string; asset_id?: string }>,
   planProgress: 0,
   planSubstep: null,
   generateHyperFramesProgress: 0,
@@ -168,6 +173,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setCurrentAnalyzeTask: (v) => set({ currentAnalyzeTask: v }),
   setAnalyzeCompletedSteps: (v) => set({ analyzeCompletedSteps: v }),
   setAnalyzeLogs: (v) => set({ analyzeLogs: v }),
+  setJobWarnings: (v) => set({ jobWarnings: v }),
   setPlanProgress: (v) => set({ planProgress: v }),
   setPlanSubstep: (v) => set({ planSubstep: v }),
   setGenerateHyperFramesProgress: (v) => set({ generateHyperFramesProgress: v }),
@@ -198,6 +204,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       overallProgress: 0,
       analyzeCompletedSteps: [],
       analyzeLogs: [],
+      jobWarnings: [],
       planProgress: 0,
       planSubstep: null,
       taskText: '准备就绪',

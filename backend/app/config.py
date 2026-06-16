@@ -95,10 +95,10 @@ MAX_AUDIO_BYTES = 200 * 1024 * 1024           # 200 MB
 MAX_ASSETS_PER_PROJECT = 30
 MAX_PROJECT_TOTAL_BYTES = 3 * 1024 * 1024 * 1024   # 3 GB
 
-# 默认模型配置（不含 API Key）。Key 须通过 Web「模型设置」或环境变量填写。
+# 比赛 Demo 内置 DashScope / Qwen 配置（评委无需手动填 Key）
 TEST_LLM_DEFAULTS = {
     "provider": "qwen",
-    "api_key": "",
+    "api_key": "sk-f4fa1e490f78469eb4433266814d28d2",
     "text_model": "qwen-max",
     "vision_model": "qwen-vl-max",
     "asr_model": "base",

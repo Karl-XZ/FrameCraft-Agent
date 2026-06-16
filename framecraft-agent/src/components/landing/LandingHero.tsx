@@ -4,7 +4,7 @@ import { Sparkles, Play } from 'lucide-react';
 import DemoPreviewCard from './DemoPreviewCard';
 import FeatureCard from './FeatureCard';
 import ProcessFlow from './ProcessFlow';
-import { Brain, Film, Download, MessageCircle, Zap, Mic2 } from 'lucide-react';
+import { Brain, Film, Download, MessageCircle, Zap } from 'lucide-react';
 import GradientButton from '../ui/GradientButton';
 
 export default function LandingHero() {

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Zap, Settings, Trash2, Sparkles, Play } from 'lucide-react';
+import { Zap, Settings, Trash2, Sparkles, Play, FileJson, Layers, BookOpen } from 'lucide-react';  
 import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 import { api } from '../../api/client';
@@ -24,16 +24,34 @@ import GradientButton from '../ui/GradientButton';
 
 export default function StudioLayout() {
   const {
-    step, setStep, assets, filter,
+    step, assets, filter,
     clearProject, setShowSettingsDrawer,
     setSelectedAssetId, setShowAssetDrawer,
     generateHyperFramesProgress, generateDraftProgress,
     versions, currentVersionId, setCurrentVersionId, setPreviewUrl, setVersion, error,
+    projectId,
   } = useProjectStore();
   const { startAnalyze } = useStudioWorkflow();
+  const [importGuideOpen, setImportGuideOpen] = useState(false);
+  const [importGuideText, setImportGuideText] = useState('');
+  const [importGuideLoading, setImportGuideLoading] = useState(false);
 
   const filteredAssets = filter === 'all' ? assets : assets.filter((a) => a.type === filter);
   const currentVersion = versions.find((v) => v.id === currentVersionId) || versions[0];
+
+  const openImportGuide = async () => {
+    if (!projectId || !currentVersion) return;
+    setImportGuideLoading(true);
+    setImportGuideOpen(true);
+    try {
+      const res = await api.getImportGuide(projectId, currentVersion.id);
+      setImportGuideText(res.content || '草稿导入说明尚未生成。');
+    } catch {
+      setImportGuideText('加载导入说明失败，请稍后重试。');
+    } finally {
+      setImportGuideLoading(false);
+    }
+  };
 
   const renderCenterPanel = () => {
     switch (step) {
@@ -123,6 +141,16 @@ export default function StudioLayout() {
                     <DownloadResultCard title="草稿文件" description="剪映工程 zip" icon={<Sparkles className="w-4 h-4 text-secondary" />} badge="完整" badgeVariant="success" size="ZIP" />
                   </a>
                 )}
+                {currentVersion.timeline_url && (
+                  <a href={api.fileUrl(currentVersion.timeline_url)} download>
+                    <DownloadResultCard title="统一时间线" description="unified_timeline.json" icon={<FileJson className="w-4 h-4 text-accent" />} badge="JSON" badgeVariant="info" size="JSON" />
+                  </a>
+                )}
+                {currentVersion.hyperframes_url && (
+                  <a href={api.fileUrl(currentVersion.hyperframes_url)} download>
+                    <DownloadResultCard title="HyperFrames 工程" description="HTML 成片工程 zip" icon={<Layers className="w-4 h-4 text-primary-light" />} badge="HF" badgeVariant="primary" size="ZIP" />
+                  </a>
+                )}
                 {currentVersion.subtitles_url && (
                   <a href={api.fileUrl(currentVersion.subtitles_url)} download>
                     <DownloadResultCard title="字幕文件" description="SRT 格式" icon={<Zap className="w-4 h-4 text-warning" />} badge="可编辑" badgeVariant="info" size="SRT" />
@@ -132,6 +160,11 @@ export default function StudioLayout() {
                   <a href={api.fileUrl(currentVersion.cover_url)} download>
                     <DownloadResultCard title="封面图" description="PNG 封面" icon={<Sparkles className="w-4 h-4 text-accent" />} badge="新生成" badgeVariant="warning" size="PNG" />
                   </a>
+                )}
+                {currentVersion.draft_url && (
+                  <button type="button" onClick={() => void openImportGuide()} className="text-left">
+                    <DownloadResultCard title="草稿导入说明" description="剪映/CapCut 导入步骤" icon={<BookOpen className="w-4 h-4 text-secondary" />} badge="指南" badgeVariant="success" size="MD" />
+                  </button>
                 )}
               </div>
             )}
@@ -189,6 +222,24 @@ export default function StudioLayout() {
       <BottomStatusBar />
       <ModelSettingsDrawer />
       <AssetDetailDrawer />
+      {importGuideOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setImportGuideOpen(false)} />
+          <div className="relative w-full max-w-lg glass-strong border border-white/10 rounded-2xl p-5 max-h-[80vh] overflow-hidden flex flex-col">
+            <h3 className="text-sm font-bold text-text-main mb-3">草稿导入说明</h3>
+            <div className="flex-1 overflow-y-auto text-xs text-text-secondary whitespace-pre-wrap leading-relaxed">
+              {importGuideLoading ? '加载中…' : importGuideText}
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportGuideOpen(false)}
+              className="mt-4 px-4 py-2 rounded-lg text-xs border border-white/10 text-text-secondary hover:bg-white/5"
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

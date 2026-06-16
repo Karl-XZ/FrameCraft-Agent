@@ -1,22 +1,63 @@
-import React, { useState } from 'react';
-import { X, FileVideo, Image, Music, Hexagon, Tag, MessageSquare, Star, Volume2, Crop, Brain } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, FileVideo, Image, Music, Hexagon, Tag, MessageSquare, Star, Brain } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
+import { api, type AssetAnalysis } from '../../api/client';
 import GradientButton from '../ui/GradientButton';
 
 const TAGS = ['口播视频', 'B-roll', '图片', '音频', 'LOGO'];
+
+function formatBrollTime(sec: number | undefined): string {
+  if (sec == null || Number.isNaN(sec)) return '—';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 export default function AssetDetailDrawer() {
   const { showAssetDrawer, setShowAssetDrawer, assets, selectedAssetId } = useProjectStore();
   const { persistAsset } = useStudioWorkflow();
   const asset = assets.find((a) => a.id === selectedAssetId);
-  const [note, setNote] = useState(asset?.note || '');
-  const [tag, setTag] = useState<string>(asset?.type || 'B-roll');
-  const [mustUse, setMustUse] = useState(true);
-  const [mute, setMute] = useState(false);
-  const [allowCrop, setAllowCrop] = useState(true);
-  const [priority, setPriority] = useState(7);
+  const [note, setNote] = useState('');
+  const [tag, setTag] = useState<string>('B-roll');
+  const [mustUse, setMustUse] = useState(false);
+  const [priority, setPriority] = useState(5);
   const [saving, setSaving] = useState(false);
+  const [analysis, setAnalysis] = useState<AssetAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+
+  useEffect(() => {
+    if (!asset) return;
+    setNote(asset.note || '');
+    setTag(asset.type || 'B-roll');
+    setMustUse(asset.mustUse);
+    setPriority(asset.priority || 5);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset?.id]);
+
+  useEffect(() => {
+    if (!showAssetDrawer || !asset) {
+      setAnalysis(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalysisLoading(true);
+    api
+      .getAssetAnalysis(asset.id)
+      .then((data) => {
+        if (!cancelled) setAnalysis(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAnalysis({ ready: false, asset_id: asset.id });
+      })
+      .finally(() => {
+        if (!cancelled) setAnalysisLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+   
+  }, [showAssetDrawer, asset?.id, asset]);
 
   if (!showAssetDrawer || !asset) return null;
 
@@ -39,17 +80,23 @@ export default function AssetDetailDrawer() {
     asset.type === '图片' ? Image :
     asset.type === '音频' ? Music : Hexagon;
 
+  const usageLabel = analysis?.ready && analysis.recommended_usage?.length
+    ? analysis.recommended_usage.join(' · ')
+    : null;
+  const brollHint = analysis?.ready && analysis.broll_segments?.length
+    ? analysis.broll_segments
+        .map((b) => `${formatBrollTime(b.time)}${b.text ? ` · ${b.text}` : ''}`)
+        .join('；')
+    : null;
+
   return (
     <div className="fixed inset-0 z-50 flex">
-      {/* Scrim */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={() => setShowAssetDrawer(false)}
       />
 
-      {/* Drawer */}
       <div className="relative ml-auto w-[420px] h-full glass-strong border-l border-white/10 flex flex-col animate-slide-in-right overflow-y-auto">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
           <div className="flex items-center gap-2">
             <TypeIcon className="w-4 h-4 text-primary-light" />
@@ -64,16 +111,15 @@ export default function AssetDetailDrawer() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Filename */}
           <div>
             <p className="text-sm font-semibold text-text-main">{asset.filename}</p>
             <div className="flex items-center gap-3 mt-1">
               {asset.duration && <span className="text-xs text-text-muted">{asset.duration}</span>}
               <span className="text-xs text-text-muted">{asset.size}</span>
+              <span className="text-xs text-text-muted">{asset.status}</span>
             </div>
           </div>
 
-          {/* Tag */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
               <Tag className="w-3.5 h-3.5" />
@@ -96,7 +142,6 @@ export default function AssetDetailDrawer() {
             </div>
           </div>
 
-          {/* User note */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
               <MessageSquare className="w-3.5 h-3.5" />
@@ -110,7 +155,6 @@ export default function AssetDetailDrawer() {
             />
           </div>
 
-          {/* Toggles */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -129,41 +173,6 @@ export default function AssetDetailDrawer() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-3.5 h-3.5 text-text-muted" />
-                <span className="text-sm text-text-secondary">静音</span>
-              </div>
-              <button
-                onClick={() => setMute(!mute)}
-                className={`w-10 h-6 rounded-full transition-all relative ${
-                  mute ? 'bg-primary' : 'bg-white/15'
-                }`}
-              >
-                <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
-                  mute ? 'left-5' : 'left-1'
-                }`} />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Crop className="w-3.5 h-3.5 text-text-muted" />
-                <span className="text-sm text-text-secondary">允许裁切</span>
-              </div>
-              <button
-                onClick={() => setAllowCrop(!allowCrop)}
-                className={`w-10 h-6 rounded-full transition-all relative ${
-                  allowCrop ? 'bg-primary' : 'bg-white/15'
-                }`}
-              >
-                <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
-                  allowCrop ? 'left-5' : 'left-1'
-                }`} />
-              </button>
-            </div>
-
-            {/* Priority */}
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-secondary flex items-center gap-2">
                 <Star className="w-3.5 h-3.5 text-warning" />
@@ -187,46 +196,71 @@ export default function AssetDetailDrawer() {
             </div>
           </div>
 
-          {/* AI Understanding */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
               <Brain className="w-3.5 h-3.5 text-primary-light" />
               AI 理解结果
             </label>
             <div className="glass-card rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-muted">内容标签</span>
-                <span className="text-xs text-secondary">产品特写 · 户外场景</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-muted">情绪色彩</span>
-                <span className="text-xs text-warning">科技感 · 高级</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-muted">推荐时段</span>
-                <span className="text-xs text-primary-light">0:28 – 0:44</span>
-              </div>
+              {analysisLoading ? (
+                <p className="text-xs text-text-muted">加载分析结果…</p>
+              ) : !analysis?.ready ? (
+                <p className="text-xs text-text-muted">尚未完成 Agent 分析，请先运行「分析素材」。</p>
+              ) : (
+                <>
+                  {analysis.vision_status && analysis.vision_status !== 'vlm' ? (
+                    <p className="text-xs text-warning border border-warning/20 rounded px-2 py-1">
+                      视觉理解已降级（{analysis.vision_status}）{analysis.vision_error ? `：${analysis.vision_error}` : ''}
+                    </p>
+                  ) : null}
+                  <div className="space-y-1">
+                    <span className="text-xs text-text-muted">内容摘要</span>
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      {analysis.auto_summary || '（无摘要）'}
+                    </p>
+                  </div>
+                  {usageLabel ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-text-muted shrink-0">推荐用途</span>
+                      <span className="text-xs text-secondary text-right">{usageLabel}</span>
+                    </div>
+                  ) : null}
+                  {analysis.ocr_text ? (
+                    <div className="space-y-1">
+                      <span className="text-xs text-text-muted">画面文字</span>
+                      <p className="text-xs text-text-secondary">{analysis.ocr_text}</p>
+                    </div>
+                  ) : null}
+                  {brollHint ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs text-text-muted shrink-0">剪辑方案引用</span>
+                      <span className="text-xs text-primary-light text-right">{brollHint}</span>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 
-          {/* Keyframe preview */}
-          {asset.type === '口播视频' || asset.type === 'B-roll' ? (
+          {analysis?.ready && analysis.frame_urls && analysis.frame_urls.length > 0 ? (
             <div className="space-y-2">
               <label className="text-xs font-semibold text-text-muted uppercase tracking-wider">
                 关键帧预览
               </label>
-              <div className="flex gap-2">
-                {['0s', '1/3', '1/2', '2/3', '1s'].map((t, i) => (
-                  <div key={i} className="flex-1 aspect-video rounded-lg bg-black/40 border border-white/8 flex items-center justify-center">
-                    <span className="text-[10px] text-text-muted">{t}</span>
-                  </div>
+              <div className="flex gap-2 overflow-x-auto">
+                {analysis.frame_urls.map((url) => (
+                  <img
+                    key={url}
+                    src={api.fileUrl(url)}
+                    alt=""
+                    className="flex-shrink-0 w-20 aspect-video rounded-lg object-cover border border-white/8 bg-black/40"
+                  />
                 ))}
               </div>
             </div>
           ) : null}
         </div>
 
-        {/* Footer */}
         <div className="px-5 py-4 border-t border-white/8 flex gap-3">
           <button
             onClick={() => setShowAssetDrawer(false)}

@@ -7,7 +7,7 @@
 - 逐词 karaoke 字幕：caption-group + 每词 <span> + GSAP color 补间
 - Hook 大标题 / lower-third / 进度条（persistent-overlay）
 - GSAP 时间线注册到 window.__timelines（paused:true）
-随后调用 hyperframes CLI 渲染 MP4，并先跑 lint（容错）。
+随后调用 hyperframes CLI 渲染 MP4；lint 未通过则中止渲染并写入 render_log.json。
 """
 from __future__ import annotations
 
@@ -66,12 +66,29 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
     clips: list[str] = []
     audios: list[str] = []
     tweens: list[str] = []
+    track_ends: dict[int, float] = {}
+
+    def _norm_span(start: float, end: float) -> tuple[float, float]:
+        start = round(float(start), 3)
+        dur = max(0.1, round(float(end) - start, 3))
+        return start, dur
+
+    def _slot_on_track(track: int, start: float, end: float) -> tuple[float, float]:
+        """避免同轨道 clip 浮点边界重叠（lint overlapping_clips_same_track）。"""
+        start = round(float(start), 3)
+        end = round(float(end), 3)
+        last = track_ends.get(track, 0.0)
+        if start < last + 0.001:
+            start = round(last + 0.001, 3)
+        dur = max(0.1, round(end - start, 3))
+        track_ends[track] = round(start + dur, 3)
+        return start, dur
 
     for item in timeline.get("items", []):
         itype = item.get("type")
-        start = float(item.get("timeline_start", 0))
-        end = float(item.get("timeline_end", start + 1))
-        dur = max(0.1, end - start)
+        raw_start = float(item.get("timeline_start", 0))
+        raw_end = float(item.get("timeline_end", raw_start + 1))
+        start, dur = _norm_span(raw_start, raw_end)
         iid = item["id"]
 
         if itype == "video":
@@ -80,8 +97,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 continue
             rel = _rel_asset(src, hf_dir)
             track = 0 if item.get("role") == "a_roll" else 1
-            zoom = ""
+            start, dur = _slot_on_track(track, raw_start, raw_end)
             anims = item.get("animations") or []
+            zoom = ""
             for a in anims:
                 if a.get("type") == "scale":
                     tweens.append(
@@ -104,6 +122,7 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
             if not src:
                 continue
             rel = _rel_asset(src, hf_dir)
+            start, dur = _slot_on_track(2, raw_start, raw_end)
             if item.get("intro_animation") == "zoom_in":
                 tweens.append(
                     f'tl.from("#{iid}", {{scale:1.2, opacity:0, duration:0.4, ease:"power2.out"}}, {start:.3f});'
@@ -115,9 +134,11 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
             )
 
         elif itype == "subtitle":
+            start, dur = _slot_on_track(5, raw_start, raw_end)
             clips.append(_karaoke_caption(item, start, dur, tweens))
 
         elif itype == "text" and item.get("role") == "hook":
+            start, dur = _slot_on_track(10, raw_start, raw_end)
             # Hook 面板范式吸收自 student-kit may-shorts-19/scene1-intro（mono kicker + slam + stamp 擦入）
             clips.append(
                 f'<div id="{iid}" class="clip" data-start="{start:.3f}" data-duration="{dur:.3f}" '
@@ -134,9 +155,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
             tweens.append(f'tl.from("#{iid}-kicker", {{opacity:0, y:14, duration:0.4, ease:"power2.out"}}, {start:.3f});')
             tweens.append(f'tl.from("#{iid}-slam", {{scale:0.6, opacity:0, duration:0.6, ease:"back.out(1.7)"}}, {start+0.15:.3f});')
             tweens.append(f'tl.to("#{iid}-stamp", {{clipPath:"inset(0 0% 0 0)", duration:0.28, ease:"power3.out"}}, {start+0.7:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{opacity:0, y:-40, duration:0.4}}, {max(start, end-0.5):.3f});')
 
         elif itype == "text" and item.get("role") == "lower_third":
+            start, dur = _slot_on_track(8, raw_start, raw_end)
             title = _esc(item.get("text", ""))
             sub = _esc(item.get("subtitle", ""))
             clips.append(
@@ -148,9 +169,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'<div style="font-size:{int(height*0.016)}px;color:#94A3B8">{sub}</div></div>'
             )
             tweens.append(f'tl.from("#{iid}", {{x:-140, opacity:0, duration:0.5}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{x:-140, opacity:0, duration:0.4}}, {max(start, end-0.5):.3f});')
 
         elif itype == "text" and item.get("role") == "keyword_pop":
+            start, dur = _slot_on_track(11, raw_start, raw_end)
             # 关键词弹出：大字号弹跳，强调色，居中偏上
             color = item.get("color", accent)
             clips.append(
@@ -161,9 +182,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'text-shadow:0 0 24px rgba(0,0,0,.6),2px 2px 0 #07121c;white-space:nowrap;">{_esc(item.get("text",""))}</div>'
             )
             tweens.append(f'tl.from("#{iid}", {{scale:0.2, opacity:0, rotation:-6, duration:0.32, ease:"back.out(2.5)"}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{scale:1.25, opacity:0, duration:0.25, ease:"power2.in"}}, {max(start, end-0.25):.3f});')
 
         elif itype == "text" and item.get("role") == "chapter_card":
+            start, dur = _slot_on_track(9, raw_start, raw_end)
             # 章节标题卡：编号 + 标题，整条横幅滑入
             color = item.get("color", primary)
             num = f'{int(item.get("index",1)):02d}'
@@ -176,9 +197,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'<div style="font-size:{int(height*0.034)}px;font-weight:900;color:#fff;max-width:62%;">{_esc(item.get("text",""))}</div></div>'
             )
             tweens.append(f'tl.from("#{iid}", {{x:-180, opacity:0, duration:0.5, ease:"power3.out"}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{opacity:0, x:-60, duration:0.4, ease:"power2.in"}}, {max(start, end-0.45):.3f});')
 
         elif itype == "text" and item.get("role") == "explainer_card":
+            start, dur = _slot_on_track(9, raw_start, raw_end)
             # 图文解释卡：标题 + 正文，半透明卡片缩放淡入
             color = item.get("color", primary)
             body = _esc(item.get("body", ""))
@@ -192,9 +213,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'<div style="font-size:{int(height*0.02)}px;line-height:1.4;color:#D5DEEA;">{body}</div></div>'
             )
             tweens.append(f'tl.from("#{iid}", {{scale:0.86, opacity:0, y:24, duration:0.4, ease:"power3.out"}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{opacity:0, y:-16, duration:0.35, ease:"power2.in"}}, {max(start, end-0.4):.3f});')
 
         elif itype == "effect" and item.get("role") == "stat_block":
+            start, dur = _slot_on_track(11, raw_start, raw_end)
             # 数字 / 价格 / 对比：大号数字弹入 + 标签
             color = item.get("color", accent)
             clips.append(
@@ -207,9 +228,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
             )
             tweens.append(f'tl.from("#{iid}-v", {{scale:0.4, opacity:0, duration:0.4, ease:"back.out(2)"}}, {start:.3f});')
             tweens.append(f'tl.from("#{iid}", {{x:60, opacity:0, duration:0.35, ease:"power2.out"}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{opacity:0, duration:0.3}}, {max(start, end-0.3):.3f});')
 
         elif itype == "effect" and item.get("role") == "annotation":
+            start, dur = _slot_on_track(12, raw_start, raw_end)
             # 手绘圈选：SVG 椭圆描边动画（产品截图标注）
             color = item.get("color", accent)
             cw, ch = int(width * 0.5), int(height * 0.18)
@@ -222,9 +243,9 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/></svg>'
             )
             tweens.append(f'tl.to("#{iid}-e", {{strokeDashoffset:0, duration:0.5, ease:"power1.inOut"}}, {start:.3f});')
-            tweens.append(f'tl.to("#{iid}", {{opacity:0, duration:0.3}}, {max(start, end-0.3):.3f});')
 
         elif itype == "text" and item.get("role") == "cta":
+            start, dur = _slot_on_track(13, raw_start, raw_end)
             # 结尾 CTA 面板
             color = item.get("color", accent)
             pcolor = item.get("primary", primary)
@@ -242,7 +263,8 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
         elif itype == "shape" and item.get("role") == "progress_bar":
             color = item.get("color", "#EF4444")
             clips.append(
-                f'<div id="{iid}" data-timeline-role="persistent-overlay" data-track-index="99" '
+                f'<div id="{iid}" class="clip" data-start="0" data-duration="{duration:.3f}" '
+                f'data-timeline-role="persistent-overlay" data-track-index="99" '
                 f'data-layout-ignore="true" '
                 f'style="position:absolute;left:0;right:0;bottom:0;height:8px;background:rgba(255,255,255,.12);">'
                 f'<div id="{iid}-bar" style="height:100%;width:0%;background:{color};"></div></div>'
@@ -262,6 +284,39 @@ def generate_hyperframes_project(timeline: dict, out_dir: Path) -> Path:
                 f'data-duration="{adur:.3f}" data-track-index="3" data-volume="{item.get("volume",0.25)}"></audio>'
             )
 
+    # 多场景统一 crossfade 过渡：由 timeline.export_settings.transition 控制强度/时长。
+    scenes = [s for s in timeline.get("scenes", []) if isinstance(s, dict)]
+    transition = ((timeline.get("export_settings") or {}).get("transition") or {})
+    t_style = str(transition.get("style") or "crossfade").strip().lower()
+    t_opacity = float(transition.get("opacity") or 0.22)
+    t_duration = float(transition.get("duration") or 0.18)
+    t_opacity = max(0.0, min(0.8, t_opacity))
+    t_duration = max(0.05, min(0.8, t_duration))
+    boundaries: list[float] = []
+    for i in range(len(scenes) - 1):
+        try:
+            b = float(scenes[i].get("timeline_end", 0))
+        except (TypeError, ValueError):
+            continue
+        if 0.05 < b < float(duration) - 0.05:
+            boundaries.append(b)
+    if boundaries and t_style == "crossfade":
+        clips.append(
+            f'<div id="scene-xfade" class="clip" data-start="0" data-duration="{duration:.3f}" '
+            f'data-track-index="98" data-layout-ignore="true" '
+            f'style="position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;"></div>'
+        )
+        for b in boundaries:
+            t0 = max(0.0, b - t_duration)
+            tweens.append(
+                f'tl.fromTo("#scene-xfade", {{opacity:0}}, {{opacity:{t_opacity:.3f}, duration:{t_duration:.3f}, ease:"power1.out"}}, {t0:.3f});'
+            )
+            tweens.append(
+                f'tl.to("#scene-xfade", {{opacity:0, duration:{t_duration:.3f}, ease:"power1.in"}}, {t0:.3f});'
+            )
+            # lint: gsap_exit_missing_hard_kill — 在 exit tween 结束时刻 hard kill
+            tweens.append(f'tl.set("#scene-xfade", {{opacity:0}}, {(b + t_duration):.3f});')
+
     html_doc = _render_html(project, width, height, duration, fps, clips, audios, tweens, bg_grad)
     (hf_dir / "index.html").write_text(html_doc, encoding="utf-8")
     write_json(hf_dir / "meta.json", {"title": project.get("name"), "duration": duration, "fps": fps})
@@ -280,9 +335,8 @@ def _karaoke_caption(item: dict, start: float, dur: float, tweens: list[str]) ->
     spoken = item.get("normal_color", "#FFFFFF")      # SPOKEN 已读
     dim = "rgba(255,255,255,0.65)"                     # DIM 未读
     end = start + dur
-    # 段落整体淡入 / 淡出（PRE_ROLL / POST_HOLD 借鉴 ms19）
+    # 段落整体淡入（结尾由 data-duration 控制，不做中间场景 exit 动画）
     tweens.append(f'tl.fromTo("#{iid}", {{opacity:0, y:10}}, {{opacity:1, y:0, duration:0.18, ease:"power2.out"}}, {start:.3f});')
-    tweens.append(f'tl.to("#{iid}", {{opacity:0, duration:0.18, ease:"power2.in"}}, {max(start, end-0.18):.3f});')
     spans = []
     if words:
         for wi, w in enumerate(words):
@@ -293,8 +347,12 @@ def _karaoke_caption(item: dict, start: float, dur: float, tweens: list[str]) ->
             ws = float(w["start"])
             we = float(w["end"])
             tweens.append(f'tl.set("#{wid}", {{color:"{dim}", scale:1}}, {start:.3f});')
-            tweens.append(f'tl.to("#{wid}", {{color:"{active}", scale:1.14, duration:0.08, ease:"back.out(3)"}}, {ws:.3f});')
-            tweens.append(f'tl.to("#{wid}", {{color:"{spoken}", scale:1, duration:0.12, ease:"power2.out"}}, {we:.3f});')
+            tweens.append(
+                f'tl.to("#{wid}", {{color:"{active}", scale:1.14, duration:0.08, ease:"back.out(3)", overwrite:"auto"}}, {ws:.3f});'
+            )
+            tweens.append(
+                f'tl.to("#{wid}", {{color:"{spoken}", scale:1, duration:0.12, ease:"power2.out", overwrite:"auto"}}, {we:.3f});'
+            )
     else:
         spans.append(f'<span style="color:{spoken};">{_esc(item.get("text",""))}</span>')
     # 8 方向描边阴影（ms19 captions 规范；禁用 -webkit-text-stroke）
@@ -305,7 +363,7 @@ def _karaoke_caption(item: dict, start: float, dur: float, tweens: list[str]) ->
     family_css = f"font-family:'{font_family}','Noto Sans SC',sans-serif;" if font_family else ""
     return (
         f'<div id="{iid}" class="clip caption-group" data-start="{start:.3f}" data-duration="{dur:.3f}" '
-        f'data-track-index="5" data-timeline-label="captions" '
+        f'data-track-index="5" data-timeline-label="captions" data-hf-anim="karaoke" '
         f'style="position:absolute;left:50%;bottom:11.5%;transform:translateX(-50%);max-width:87%;'
         f'text-align:center;font-size:{fs_vh}vh;font-weight:900;line-height:1.14;letter-spacing:.01em;{family_css}'
         f'text-shadow:{stroke};">'
@@ -352,25 +410,49 @@ def _render_html(project, width, height, duration, fps, clips, audios, tweens, b
 def lint_project(hf_dir: Path) -> tuple[bool, str]:
     node = str(NODE_EXE) if NODE_EXE.exists() else "node"
     if not HYPERFRAMES_CLI.exists():
-        return True, "hyperframes CLI 不存在，跳过 lint"
+        return False, "HyperFrames CLI 未安装，无法执行 lint"
     result = run_cmd([node, str(HYPERFRAMES_CLI), "lint", str(hf_dir)], cwd=hf_dir)
     ok = result.returncode == 0
     return ok, (result.stdout or "") + (result.stderr or "")
+
+
+def lint_hyperframes(version_dir: Path) -> tuple[bool, str]:
+    """仅执行 HyperFrames lint，不渲染。"""
+    hf_dir = version_dir / "hyperframes"
+    if not (hf_dir / "index.html").is_file():
+        return False, "hyperframes/index.html 不存在"
+    lint_ok, lint_out = lint_project(hf_dir)
+    write_json(version_dir / "render_log.json", {
+        "lint_ok": lint_ok,
+        "lint_output": (lint_out or "")[:8000],
+    })
+    return lint_ok, lint_out or ""
 
 
 def render_preview(hf_dir: Path, preview_path: Path, fps: int = 30, quality: str = "draft") -> None:
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     if not HYPERFRAMES_CLI.exists():
         raise RuntimeError("HyperFrames CLI 未安装")
+    version_dir = hf_dir.parent
+    lint_ok, lint_out = lint_project(hf_dir)
+    render_log = {
+        "lint_ok": lint_ok,
+        "lint_output": (lint_out or "")[:8000],
+    }
+    write_json(version_dir / "render_log.json", render_log)
+    if not lint_ok:
+        raise RuntimeError(f"HyperFrames lint 未通过，已中止渲染：{(lint_out or '')[:800]}")
     node = str(NODE_EXE) if NODE_EXE.exists() else "node"
     q = QUALITY_MAP.get(quality, quality if quality in {"draft", "standard", "high"} else "draft")
-    lint_project(hf_dir)  # 容错：仅记录，不阻断
     cmd = [
         node, str(HYPERFRAMES_CLI), "render", str(hf_dir),
         "-o", str(preview_path), "--fps", str(fps), "-q", q,
     ]
-    # render 子命令使用捆绑 Chromium；CHROME_EXE 仅用于 preview/play，故不传入。
     result = run_cmd(cmd, cwd=hf_dir)
+    render_log["render_ok"] = result.returncode == 0 and preview_path.exists()
+    render_log["render_stderr"] = (result.stderr or "")[:4000]
+    render_log["render_stdout"] = (result.stdout or "")[:4000]
+    write_json(version_dir / "render_log.json", render_log)
     if result.returncode != 0 or not preview_path.exists():
         raise RuntimeError(f"HyperFrames render failed: {result.stderr or result.stdout}")
 

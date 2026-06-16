@@ -1,46 +1,80 @@
 import React from 'react';
+import { useProjectStore } from '../../store/projectStore';
 
-const SEGMENTS = [
-  { label: 'Hook', color: 'bg-primary', width: '12%', time: '7s' },
-  { label: '口播第一段', color: 'bg-secondary', width: '25%', time: '15s' },
-  { label: '产品B-roll', color: 'bg-accent', width: '20%', time: '12s' },
-  { label: '图文动画', color: 'bg-warning', width: '18%', time: '10s' },
-  { label: '总结CTA', color: 'bg-success', width: '25%', time: '14s' },
-];
+const COLORS = ['bg-primary', 'bg-secondary', 'bg-accent', 'bg-warning', 'bg-success', 'bg-info'];
+
+function formatSec(sec: number): string {
+  if (!Number.isFinite(sec)) return '—';
+  const s = Math.round(sec);
+  return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`;
+}
 
 export default function MiniTimeline() {
+  const editPlan = useProjectStore((s) => s.editPlan);
+
+  const scenes = (editPlan?.scenes || []) as Array<{
+    caption?: string;
+    timeline_start?: number;
+    timeline_end?: number;
+  }>;
+
+  if (!scenes.length) {
+    return (
+      <div className="glass-card rounded-xl p-4">
+        <span className="text-xs text-text-muted">完成 Agent 分析后将显示剪辑方案时间线</span>
+      </div>
+    );
+  }
+
+  const total = editPlan?.target_duration
+    || Math.max(...scenes.map((sc) => Number(sc.timeline_end) || 0), 1);
+
   return (
     <div className="glass-card rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold text-text-secondary">视频时间线</span>
-        <span className="text-xs text-text-muted">总时长 58s</span>
+        <span className="text-xs font-semibold text-text-secondary">剪辑方案时间线</span>
+        <span className="text-xs text-text-muted">总时长 {formatSec(total)}</span>
       </div>
 
-      {/* Timeline bar */}
       <div className="flex gap-1 h-8 rounded-lg overflow-hidden">
-        {SEGMENTS.map((seg, i) => (
-          <div
-            key={i}
-            className={`${seg.color} rounded flex items-center justify-center relative group cursor-pointer`}
-            style={{ width: seg.width }}
-            title={`${seg.label}: ${seg.time}`}
-          >
-            <span className="text-[10px] font-semibold text-white/90 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap px-1">
-              {seg.label}
-            </span>
-          </div>
-        ))}
+        {scenes.map((seg, i) => {
+          const start = Number(seg.timeline_start) || 0;
+          const end = Number(seg.timeline_end) || start + 1;
+          const dur = Math.max(0.1, end - start);
+          const widthPct = `${Math.max(4, (dur / total) * 100)}%`;
+          const color = COLORS[i % COLORS.length];
+          const label = seg.caption?.slice(0, 12) || `场景 ${i + 1}`;
+          return (
+            <div
+              key={i}
+              className={`${color} rounded flex items-center justify-center relative group cursor-default`}
+              style={{ width: widthPct }}
+              title={`${label}: ${formatSec(dur)}`}
+            >
+              <span className="text-[10px] font-semibold text-white/90 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap px-1">
+                {label}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Labels */}
-      <div className="flex gap-1 mt-2">
-        {SEGMENTS.map((seg, i) => (
-          <div key={i} className="flex items-center gap-1" style={{ width: seg.width }}>
-            <div className={`w-2 h-2 rounded-full ${seg.color}`} />
-            <span className="text-[10px] text-text-muted truncate">{seg.label}</span>
-            <span className="text-[10px] text-text-muted ml-auto">{seg.time}</span>
-          </div>
-        ))}
+      <div className="flex gap-1 mt-2 flex-wrap">
+        {scenes.map((seg, i) => {
+          const start = Number(seg.timeline_start) || 0;
+          const end = Number(seg.timeline_end) || start + 1;
+          const dur = Math.max(0.1, end - start);
+          const widthPct = `${Math.max(8, (dur / total) * 100)}%`;
+          const color = COLORS[i % COLORS.length];
+          const label = seg.caption?.slice(0, 10) || `场景${i + 1}`;
+          return (
+            <div key={i} className="flex items-center gap-1 min-w-0" style={{ width: widthPct }}>
+              <div className={`w-2 h-2 rounded-full shrink-0 ${color}`} />
+              <span className="text-[10px] text-text-muted truncate">{label}</span>
+              <span className="text-[10px] text-text-muted ml-auto shrink-0">{formatSec(dur)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

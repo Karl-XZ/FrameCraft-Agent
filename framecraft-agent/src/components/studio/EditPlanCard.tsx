@@ -6,8 +6,15 @@ import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 
 export default function EditPlanCard() {
-  const { editPlan } = useProjectStore();
+  const { editPlan, jobWarnings } = useProjectStore();
   const { startGenerate } = useStudioWorkflow();
+
+  const planWarnings = [
+    ...(jobWarnings || []),
+    ...(editPlan?.meta?.llm_note
+      ? [{ code: 'edit_plan_llm', message: editPlan.meta.llm_note }]
+      : []),
+  ];
 
   if (!editPlan) {
     return (
@@ -26,9 +33,20 @@ export default function EditPlanCard() {
             剪辑方案
           </h3>
           <span className="px-3 py-1 rounded-full bg-primary/15 text-primary-light text-xs font-semibold border border-primary/20">
-            AI 推荐
+            {editPlan.meta?.llm_status === 'ok' || !editPlan.meta?.llm_status ? 'Agent 方案' : '规则方案（已降级）'}
           </span>
         </div>
+
+        {planWarnings.length > 0 && (
+          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 space-y-1">
+            <p className="text-xs font-semibold text-warning">分析/方案降级提示（非全部能力成功）</p>
+            {planWarnings.map((w, i) => (
+              <p key={i} className="text-xs text-text-secondary leading-relaxed">
+                · {w.message}
+              </p>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-4 flex-wrap">
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/8">

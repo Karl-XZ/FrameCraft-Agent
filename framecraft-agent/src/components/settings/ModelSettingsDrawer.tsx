@@ -18,7 +18,7 @@ const PROVIDER_DEFAULTS: Record<string, { text_model: string; vision_model: stri
 export default function ModelSettingsDrawer() {
   const {
     showSettingsDrawer, setShowSettingsDrawer,
-    modelProvider, setModelProvider,
+    setModelProvider,
     apiKey, setApiKey,
     videoRatio, setVideoRatio,
     videoResolution, setVideoResolution,

@@ -55,6 +55,22 @@ export interface BackendJob {
   plan_substep?: string | null;
   plan_progress?: number;
   logs?: string[];
+  warnings?: Array<{ code?: string; message: string; asset_id?: string }>;
+}
+
+export interface AssetAnalysis {
+  ready: boolean;
+  asset_id: string;
+  auto_summary?: string;
+  recommended_usage?: string[];
+  ocr_text?: string;
+  vision_status?: string;
+  vision_error?: string | null;
+  ocr_status?: string;
+  ocr_error?: string | null;
+  meta?: Record<string, unknown>;
+  frame_urls?: string[];
+  broll_segments?: Array<{ time?: number; text?: string; source?: string; asset_id?: string }>;
 }
 
 export interface EditPlan {
@@ -66,6 +82,11 @@ export interface EditPlan {
   bgm_note: string;
   scenes: Array<Record<string, unknown>>;
   broll_plan: Array<{ time: number; text: string; source: string; asset_id?: string }>;
+  meta?: {
+    llm_status?: string;
+    llm_error?: string | null;
+    llm_note?: string | null;
+  };
 }
 
 export interface BackendVersion {
@@ -73,8 +94,11 @@ export interface BackendVersion {
   version_number: number;
   preview_url: string | null;
   draft_url: string | null;
+  timeline_url: string | null;
   subtitles_url: string | null;
   cover_url: string | null;
+  publish_copy_url: string | null;
+  hyperframes_url: string | null;
 }
 
 export interface CreateProjectBody {
@@ -122,6 +146,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  getAssetAnalysis: (assetId: string) => request<AssetAnalysis>(`/api/assets/${assetId}/analysis`),
   analyze: (projectId: string, opts?: { strategy?: string; platform?: string }) =>
     request<BackendJob>(`/api/projects/${projectId}/assets/analyze`, {
       method: 'POST',

@@ -1,12 +1,8 @@
 import React from 'react';
-import { Upload, Sparkles, Zap } from 'lucide-react';
+import { Upload, Zap } from 'lucide-react';
 import GradientButton from '../ui/GradientButton';
 
-interface StudioEmptyStateProps {
-  onLoadDemo?: () => void;
-}
-
-export default function StudioEmptyState({ onLoadDemo }: StudioEmptyStateProps) {
+export default function StudioEmptyState() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8">
       {/* Icon */}
@@ -28,15 +24,6 @@ export default function StudioEmptyState({ onLoadDemo }: StudioEmptyStateProps) 
           <Upload className="w-4 h-4" />
           上传素材
         </GradientButton>
-        {onLoadDemo && (
-          <button
-            onClick={onLoadDemo}
-            className="flex items-center gap-2 px-6 py-4 rounded-xl text-sm font-semibold glass hover:bg-white/[0.08] transition-colors text-text-secondary border border-white/10"
-          >
-            <Sparkles className="w-4 h-4 text-warning" />
-            加载演示项目
-          </button>
-        )}
       </div>
 
       {/* Supported formats */}

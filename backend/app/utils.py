@@ -32,11 +32,10 @@ def set_setting(db: Session, key: str, value: str) -> None:
 
 
 def seed_test_llm_defaults(db: Session) -> None:
-    """初始化默认模型配置（不含 API Key）。"""
-    if get_setting(db, "llm_model", "").strip():
-        return
+    """比赛 Demo：数据库缺项时写入 DashScope 默认配置（含内置 API Key）。"""
     mapping = {
         "provider": "llm_provider",
+        "api_key": "llm_api_key",
         "text_model": "llm_model",
         "vision_model": "vlm_model",
         "asr_model": "asr_model",
@@ -45,14 +44,6 @@ def seed_test_llm_defaults(db: Session) -> None:
     for field, db_key in mapping.items():
         if not get_setting(db, db_key, "").strip():
             set_setting(db, db_key, TEST_LLM_DEFAULTS[field])
-    env_key = (
-        os.getenv("LLM_API_KEY")
-        or os.getenv("OPENAI_API_KEY")
-        or os.getenv("DASHSCOPE_API_KEY")
-        or ""
-    ).strip()
-    if env_key and not get_setting(db, "llm_api_key", "").strip():
-        set_setting(db, "llm_api_key", env_key)
 
 
 def get_model_settings(db: Session) -> dict:

@@ -16,7 +16,7 @@ from ..models import Asset, ChatMessage, Job, JobStatus, Project, ProjectVersion
 from ..schemas import ApplyPatchIn, ChatIn, ChatOut, JobOut, ModelSettings, VersionOut
 from ..services.job_runner import job_runner
 from ..services.chat_service import handle_agent_chat
-from ..services.patch_service import validate_patch
+from ..services.patch_service import prepare_patched_version, validate_patch
 from ..utils import get_model_settings, read_json, set_setting
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -65,6 +65,61 @@ def asset_thumbnail(asset_id: str, db: Session = Depends(get_db)):
     return FileResponse(asset.thumbnail_path)
 
 
+@router.get("/assets/{asset_id}/analysis")
+def asset_analysis(asset_id: str, db: Session = Depends(get_db)):
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    if asset.analysis_status != "completed" or not asset.analysis_json_path:
+        return {"ready": False, "asset_id": asset_id}
+    ap = Path(asset.analysis_json_path)
+    if not ap.exists():
+        return {"ready": False, "asset_id": asset_id}
+    data = read_json(ap)
+    frames_dir = ap.parent / "frames"
+    frame_urls: list[str] = []
+    if frames_dir.is_dir():
+        for f in sorted(frames_dir.iterdir()):
+            if f.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+                frame_urls.append(f"/api/assets/{asset_id}/frames/{f.name}")
+    broll_segments: list[dict] = []
+    if asset.project_id:
+        plan_path = OUTPUTS_DIR / asset.project_id / "analysis" / "edit_plan.json"
+        if plan_path.exists():
+            plan = read_json(plan_path)
+            for row in plan.get("broll_plan") or []:
+                if row.get("asset_id") == asset_id:
+                    broll_segments.append(row)
+    return {
+        "ready": True,
+        "asset_id": asset_id,
+        "auto_summary": data.get("auto_summary") or "",
+        "recommended_usage": data.get("recommended_usage") or [],
+        "ocr_text": data.get("ocr_text") or "",
+        "vision_status": data.get("vision_status"),
+        "vision_error": data.get("vision_error"),
+        "ocr_status": data.get("ocr_status"),
+        "ocr_error": data.get("ocr_error"),
+        "meta": data.get("meta") or {},
+        "frame_urls": frame_urls,
+        "broll_segments": broll_segments,
+    }
+
+
+@router.get("/assets/{asset_id}/frames/{frame_name}")
+def asset_frame(asset_id: str, frame_name: str, db: Session = Depends(get_db)):
+    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    if not asset or not asset.analysis_json_path:
+        raise HTTPException(404, "Frame not found")
+    safe = Path(frame_name).name
+    if safe != frame_name or ".." in frame_name:
+        raise HTTPException(400, "Invalid frame name")
+    frame_path = Path(asset.analysis_json_path).parent / "frames" / safe
+    if not frame_path.exists():
+        raise HTTPException(404, "Frame not found")
+    return FileResponse(frame_path)
+
+
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -93,6 +148,7 @@ async def job_events(job_id: str, db: Session = Depends(get_db)):
                     "completed_steps": meta.get("completed_steps") or [],
                     "plan_substep": meta.get("plan_substep"),
                     "plan_progress": meta.get("plan_progress"),
+                    "warnings": meta.get("warnings") or [],
                     "logs": _tail_job_log(job.log_path),
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -176,14 +232,16 @@ def publish_copy(project_id: str, version_id: str, db: Session = Depends(get_db)
 
 @router.get("/projects/{project_id}/versions/{version_id}/hyperframes")
 def hyperframes_zip(project_id: str, version_id: str, db: Session = Depends(get_db)):
-    v = db.query(ProjectVersion).filter(ProjectVersion.id == version_id).first()
+    v = db.query(ProjectVersion).filter(
+        ProjectVersion.id == version_id, ProjectVersion.project_id == project_id
+    ).first()
     if not v:
-        raise HTTPException(404)
+        raise HTTPException(404, "Version not found")
     from ..config import OUTPUTS_DIR
 
     z = OUTPUTS_DIR / project_id / version_id / "hyperframes_project.zip"
     if not z.exists():
-        raise HTTPException(404)
+        raise HTTPException(404, "File not found")
     return FileResponse(z)
 
 
@@ -262,6 +320,10 @@ def chat(project_id: str, body: ChatIn, db: Session = Depends(get_db)):
     reply = result.reply
     if not reply:
         raise HTTPException(502, "Agent 未返回有效回复")
+    try:
+        patched_version_id, patched_version_dir = prepare_patched_version(db, project_id, patch)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     agent_msg = ChatMessage(
         id=f"msg_{uuid.uuid4().hex[:10]}",
         project_id=project_id,
@@ -275,7 +337,13 @@ def chat(project_id: str, body: ChatIn, db: Session = Depends(get_db)):
         id=f"job_{uuid.uuid4().hex[:12]}",
         project_id=project_id,
         type="chat_regenerate",
-        meta={"patch": patch, "message": body.message},
+        meta={
+            "patch": patch,
+            "message": body.message,
+            "patched_version_id": patched_version_id,
+            "patched_version_dir": str(patched_version_dir),
+            "patch_applied_server_side": True,
+        },
     )
     db.add(job)
     db.commit()
@@ -360,9 +428,19 @@ def apply_patch_endpoint(project_id: str, body: ApplyPatchIn, db: Session = Depe
     ok, errors = validate_patch(timeline, body.patch)
     if not ok:
         raise HTTPException(400, "patch 校验失败：" + "；".join(errors))
+    try:
+        patched_version_id, patched_version_dir = prepare_patched_version(db, project_id, body.patch)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     job = Job(
         id=f"job_{uuid.uuid4().hex[:12]}", project_id=project_id, type="chat_regenerate",
-        meta={"patch": body.patch, "message": body.patch.get("description", "应用修改")},
+        meta={
+            "patch": body.patch,
+            "message": body.patch.get("description", "应用修改"),
+            "patched_version_id": patched_version_id,
+            "patched_version_dir": str(patched_version_dir),
+            "patch_applied_server_side": True,
+        },
     )
     db.add(job)
     db.commit()
@@ -400,9 +478,11 @@ def activate_version(project_id: str, version_id: str, db: Session = Depends(get
 
 @router.get("/projects/{project_id}/versions/{version_id}/import-guide")
 def import_guide(project_id: str, version_id: str, db: Session = Depends(get_db)):
-    v = db.query(ProjectVersion).filter(ProjectVersion.id == version_id).first()
+    v = db.query(ProjectVersion).filter(
+        ProjectVersion.id == version_id, ProjectVersion.project_id == project_id
+    ).first()
     if not v:
-        raise HTTPException(404)
+        raise HTTPException(404, "Version not found")
     guide = OUTPUTS_DIR / project_id / version_id / "draft" / "draft_import_guide.md"
     if not guide.exists():
         return {"content": "草稿导入说明尚未生成。"}

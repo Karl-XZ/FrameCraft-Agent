@@ -299,7 +299,12 @@ def build_timeline(
             "hook": "hook_bold_yellow",
             "template": template,
         },
-        "export_settings": {"resolution": resolution, "draft_target": "jianying", "fps": fps},
+        "export_settings": {
+            "resolution": resolution,
+            "draft_target": "jianying",
+            "fps": fps,
+            "transition": plan.get("transition") or {"style": "crossfade", "opacity": 0.22, "duration": 0.18},
+        },
         "meta": {
             "hook": plan.get("hook"),
             "video_concept": plan.get("video_concept"),

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Zap, Film, Sparkles } from 'lucide-react';
-import { useProjectStore } from '../../store/projectStore';
+import { Zap, Film } from 'lucide-react';
 
 export default function AppHeader() {
   return (

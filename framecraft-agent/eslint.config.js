@@ -18,5 +18,9 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // 数据拉取类 effect 在业务中常见，关闭该过严规则
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

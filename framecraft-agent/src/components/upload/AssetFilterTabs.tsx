@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, FileVideo, Image, Music, Hexagon, Folder } from 'lucide-react';
+import React from 'react';
+import { FileVideo, Image, Music, Hexagon, Folder } from 'lucide-react';
 import { useProjectStore, AssetType } from '../../store/projectStore';
 
 const FILTERS: { key: AssetType; label: string; icon: React.ReactNode }[] = [

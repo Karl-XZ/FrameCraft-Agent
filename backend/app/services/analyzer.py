@@ -8,7 +8,12 @@ from ..config import OUTPUTS_DIR
 from ..models import Asset
 from ..utils import write_json
 from .asr_service import build_cut_candidates, build_highlights, transcribe_audio
-from .llm import classify_image_usage, ocr_image, vision_describe, vision_describe_frames
+from .llm import (
+    classify_image_usage,
+    ocr_image_with_meta,
+    vision_describe_with_meta,
+    vision_describe_frames_with_meta,
+)
 from .media import extract_audio, extract_keyframes, extract_thumbnail, image_thumbnail, probe_media
 
 
@@ -30,6 +35,13 @@ def classify_label(asset: Asset) -> str:
     return asset.user_label or "素材"
 
 
+def _append_warning(warnings: list[dict], code: str, message: str, *, asset_id: str | None = None) -> None:
+    item = {"code": code, "message": message}
+    if asset_id:
+        item["asset_id"] = asset_id
+    warnings.append(item)
+
+
 def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
     assets = db.query(Asset).filter(Asset.project_id == project_id).all()
     work_dir = OUTPUTS_DIR / project_id / "analysis"
@@ -42,6 +54,7 @@ def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
             talk_asset = a
 
     manifest_assets = []
+    analysis_warnings: list[dict] = []
     asr_data = None
 
     if talk_asset:
@@ -51,15 +64,30 @@ def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
         on_step("Whisper 转录", 25)
         try:
             asr_data = transcribe_audio(audio_path, work_dir / "asr")
+            asr_data["degraded"] = False
+            asr_data["degraded_reason"] = None
         except Exception as exc:
-            # ASR 不可用 / 无语音时降级：继续生成（字幕将为空），不让整个任务失败
-            on_step(f"ASR 降级（{str(exc)[:60]}），跳过逐词字幕", 35)
-            asr_data = {"language": "", "duration": 0, "text": "", "segments": [], "words": []}
-            # 仍输出 §6.3.1 要求的完整产物（空内容），保证产物结构一致
+            reason = str(exc)[:300]
+            on_step(f"ASR 失败：{reason[:80]}", 35)
+            asr_data = {
+                "language": "",
+                "duration": 0,
+                "text": "",
+                "segments": [],
+                "words": [],
+                "degraded": True,
+                "degraded_reason": reason,
+            }
             write_json(work_dir / "asr" / "asr_result.json", asr_data)
-            write_json(work_dir / "asr" / "transcript.json", {"text": "", "language": ""})
+            write_json(work_dir / "asr" / "transcript.json", {"text": "", "language": "", "degraded": True})
             write_json(work_dir / "asr" / "word_timestamps.json", [])
             write_json(work_dir / "asr" / "speech_segments.json", [])
+            _append_warning(
+                analysis_warnings,
+                "asr_degraded",
+                f"口播转录失败，成片将无逐词字幕。原因：{reason}",
+                asset_id=talk_asset.id,
+            )
         on_step("分析口播结构", 40)
         write_json(work_dir / "cut_candidates.json", build_cut_candidates(asr_data["segments"]))
         write_json(work_dir / "highlight_sentences.json", build_highlights(asr_data["segments"]))
@@ -72,23 +100,58 @@ def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
         summary = ""
         recommended = []
         ocr_text = ""
+        vision_status = "n/a"
+        vision_error = None
+        ocr_status = "n/a"
+        ocr_error = None
 
         if asset.file_type == "video" and asset.id != (talk_asset.id if talk_asset else None):
             on_step("抽帧理解 B-roll", 45 + int(20 * (idx + 1) / max(len(assets), 1)))
             frames = extract_keyframes(p, analysis_dir / "frames")
             if frames:
-                # 多帧综合理解（场景/人物/物体/界面/文字）
-                summary = vision_describe_frames(db, frames, asset.user_note)
+                vis = vision_describe_frames_with_meta(db, frames, asset.user_note)
+                summary = vis.text
+                vision_status = vis.vision_status
+                vision_error = vis.error
             else:
-                summary = f"视频素材 {asset.file_name}"
+                summary = f"视频素材 {asset.file_name}（未能抽取关键帧）"
+                vision_status = "unavailable"
+                vision_error = "关键帧抽取失败"
+            if vision_status != "vlm":
+                _append_warning(
+                    analysis_warnings,
+                    "vision_degraded",
+                    f"素材 {asset.file_name}：{vision_error or '视觉理解已降级'}",
+                    asset_id=asset.id,
+                )
             recommended = ["broll"]
             thumb = extract_thumbnail(p, analysis_dir / "thumb.jpg")
             if thumb:
                 asset.thumbnail_path = str(thumb)
         elif asset.file_type == "image":
             on_step("匹配素材备注", 70 + int(12 * (idx + 1) / max(len(assets), 1)))
-            summary = vision_describe(db, p, asset.user_note)
-            ocr_text = ocr_image(db, p)
+            vis = vision_describe_with_meta(db, p, asset.user_note)
+            summary = vis.text
+            vision_status = vis.vision_status
+            vision_error = vis.error
+            ocr = ocr_image_with_meta(db, p)
+            ocr_text = ocr.text
+            ocr_status = ocr.ocr_status
+            ocr_error = ocr.error
+            if vision_status != "vlm":
+                _append_warning(
+                    analysis_warnings,
+                    "vision_degraded",
+                    f"图片 {asset.file_name}：{vision_error or '视觉理解已降级'}",
+                    asset_id=asset.id,
+                )
+            if ocr_status == "failed" and ocr_error:
+                _append_warning(
+                    analysis_warnings,
+                    "ocr_failed",
+                    f"图片 {asset.file_name} OCR 失败：{ocr_error}",
+                    asset_id=asset.id,
+                )
             recommended = classify_image_usage(asset.file_name, asset.user_label, ocr_text, summary)
             thumb = image_thumbnail(p, analysis_dir / "thumb.jpg")
             asset.thumbnail_path = str(thumb)
@@ -107,6 +170,10 @@ def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
             "auto_summary": summary,
             "recommended_usage": recommended,
             "ocr_text": ocr_text,
+            "vision_status": vision_status,
+            "vision_error": vision_error,
+            "ocr_status": ocr_status,
+            "ocr_error": ocr_error,
             "meta": meta,
         }
         write_json(analysis_dir / "analysis.json", analysis)
@@ -132,11 +199,17 @@ def analyze_project_assets(db: Session, project_id: str, on_step) -> dict:
                 "auto_summary": summary,
                 "recommended_usage": recommended,
                 "ocr_text": ocr_text,
+                "vision_status": vision_status,
             }
         )
 
     on_step("匹配素材备注", 88)
-    manifest = {"project_id": project_id, "assets": manifest_assets, "asr": asr_data}
+    manifest = {
+        "project_id": project_id,
+        "assets": manifest_assets,
+        "asr": asr_data,
+        "analysis_warnings": analysis_warnings,
+    }
     write_json(work_dir / "asset_manifest.json", manifest)
     db.commit()
     return manifest

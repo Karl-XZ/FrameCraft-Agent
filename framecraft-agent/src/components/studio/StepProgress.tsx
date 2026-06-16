@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Loader2, AlertCircle, Circle } from 'lucide-react';
+import { Check, Loader2, Circle } from 'lucide-react';
 import { useProjectStore, Step } from '../../store/projectStore';
 
 const STEPS: { key: Step; label: string }[] = [

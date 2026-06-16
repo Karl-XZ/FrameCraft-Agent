@@ -274,9 +274,10 @@ def validate_patch(timeline: dict, patch: dict) -> tuple[bool, list[str]]:
 
 
 def build_patch_from_message(message: str, timeline: dict, db: Session | None = None) -> dict:
-    """由大模型把自然语言修改意图转成 timeline patch（无规则兜底）。"""
+    """由 LLM 把自然语言转成 patch（仅由 OpenClaw 通过 apply_patch 工具调用，禁止 API 直调）。"""
     empty = {"patch_id": "patch_auto", "description": message, "operations": []}
     if db is None or not llm_available(db):
+        empty["error"] = "未配置 LLM，无法生成 patch"
         return empty
 
     subtitle_ids = [i["id"] for i in timeline.get("items", []) if i.get("type") == "subtitle"][:20]

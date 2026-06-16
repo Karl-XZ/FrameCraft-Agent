@@ -325,6 +325,8 @@ def cmd_apply_patch(args: argparse.Namespace) -> None:
             patch = read_json(Path(args.patch_file))
         elif args.message:
             patch = build_patch_from_message(args.message, timeline, db)
+            if patch.get("error") and not patch.get("operations"):
+                _out({"ok": False, "error": patch["error"]}, 1)
         else:
             patch = json.loads(sys.stdin.read())
         ok, errors = validate_patch(timeline, patch)

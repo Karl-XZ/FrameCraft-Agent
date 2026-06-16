@@ -7,15 +7,9 @@ import QuickActionChips from './QuickActionChips';
 import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 
-const DEFAULT_PROMPT = `你好！我是你的 AI 视频助手，可以帮你：
+const EMPTY_CHAT_HINT = `在下方输入消息，与 OpenClaw Agent 对话。
 
-• 根据口播内容调整剪辑节奏
-• 修改字幕风格或文案
-• 替换或增删 B-roll 镜头
-• 调整背景音乐
-• 一键导出剪映草稿
-
-用自然语言描述你想做的修改，我来帮你完成 ✨`;
+支持：调整剪辑节奏、修改字幕、替换 B-roll、调节 BGM 等。生成成片后可提出改片需求。`;
 
 export default function AgentChatPanel() {
   const [input, setInput] = useState('');
@@ -64,7 +58,7 @@ export default function AgentChatPanel() {
         {chatMessages.length === 0 && !sending ? (
           <div className="h-full flex items-center justify-center">
             <p className="text-xs text-text-muted leading-relaxed whitespace-pre-line max-w-[200px] text-center">
-              {DEFAULT_PROMPT}
+              {EMPTY_CHAT_HINT}
             </p>
           </div>
         ) : (

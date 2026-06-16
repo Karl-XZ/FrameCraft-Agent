@@ -230,24 +230,24 @@ def _extract_reply(data: dict) -> str:
     return ""
 
 
+def _build_chat_message(user_message: str, extra: dict | None = None) -> str:
+    """对话任务：只传用户消息 + 极简上下文，制片规则见 AGENTS.md。"""
+    msg = (user_message or "").strip()
+    if not msg:
+        return msg
+    if extra and extra.get("timeline_summary"):
+        ts = extra["timeline_summary"]
+        if ts.get("has_version"):
+            dur = ts.get("duration")
+            n_sub = len(ts.get("subtitle_ids") or [])
+            header = f"[当前成片] 时长 {dur}s，{n_sub} 条字幕。"
+            return f"{header}\n\n用户：{msg}"
+    return msg
+
+
 def _build_goal(task: str, project_id: str, extra: dict | None = None, user_message: str | None = None) -> str:
     if task == "chat":
-        base = (
-            f"你是帧造 Agent 视频剪辑助手（项目 {project_id}）。\n"
-            "这是【对话任务】，不是 analyze/generate。\n"
-            "规则：\n"
-            "- 打招呼、问能力、闲聊：直接用中文自然回复，不要调用重型工具。\n"
-            "- 用户明确要求改片（改字幕/动效/时长等）：先 exec `framecraft-tool.cmd read_timeline`，"
-            "再 exec `framecraft-tool.cmd apply_patch --message \"...\"` 或自行构造 patch，"
-            "最后 exec `framecraft-tool.cmd write_chat_result` 写入 "
-            '{"reply":"...","status":"proposed|chat|not_understood","patch":{...}}。\n'
-            "- 纯闲聊时不要 write_chat_result，直接回复即可。\n"
-        )
-        if extra:
-            base += "\n当前成片摘要：\n" + json.dumps(extra, ensure_ascii=False, indent=2)
-        if user_message:
-            base += f"\n\n用户消息：{user_message}"
-        return base
+        return _build_chat_message(user_message or "", extra)
 
     base = (
         f"你是帧造 Agent 制片系统。项目 ID：{project_id}。\n"
@@ -280,6 +280,13 @@ def _build_goal(task: str, project_id: str, extra: dict | None = None, user_mess
             "6. cmd /c framecraft-tool.cmd finalize_version --version-dir <dir> --hyperframes-dir <hf>\n"
             "7. cmd /c framecraft-tool.cmd job_progress --progress 100 --step \"完成\"\n"
             "未调用 finalize_version 并产出 preview.mp4 不得结束。\n"
+        )
+    elif task == "chat_regenerate":
+        base += (
+            "\nchat_regenerate：用户已确认 patch，必须基于 meta 中的 patch 重新渲染。\n"
+            "1. read_state / read_timeline\n"
+            "2. 对新 version_dir 执行 workflow_build → render_preview → finalize_version\n"
+            "3. job_progress --progress 100\n"
         )
     if extra:
         base += "\n附加参数：\n" + json.dumps(extra, ensure_ascii=False, indent=2)
@@ -314,7 +321,9 @@ def run_openclaw_task(
     thinking = _thinking_level(task, cfg.get("provider") or "dashscope", cfg.get("text_model") or "qwen-max")
 
     if task == "chat":
-        timeout = min(timeout, 120)
+        if not (user_message or "").strip():
+            return OpenClawResult(False, "", None, "缺少用户消息")
+        timeout = max(timeout, 180)
     elif task == "analyze":
         timeout = max(timeout, 2400)
     elif task in ("generate", "chat_regenerate"):

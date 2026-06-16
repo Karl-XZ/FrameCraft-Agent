@@ -37,7 +37,18 @@
 - 若项目需要草稿：`export_draft`
 - `finalize_version` 注册 DB 版本
 
-## 任务：chat / chat_regenerate
+## 任务：studio 对话（Web 侧边栏实时聊天）
+
+用户在 Web 侧边栏发送 **单条消息**。与 analyze/generate 不同，这是轻量对话：
+
+1. **直接回应用户本条消息** — 禁止重复自我介绍、禁止「看起来您在确认身份/角色」、禁止反问「您的名字」等套话
+2. **闲聊 / 问能力**：用 1～3 句中文自然回复即可，**不要**调用 `write_chat_result`
+3. **改片指令**（改字幕、BGM、节奏、换素材等）：
+   - `read_timeline` → `apply_patch --message "..."` → `write_chat_result`
+   - JSON 中 `status` 必须为 `proposed`，并包含有效 `patch.operations`
+4. 无法理解时：`write_chat_result` 且 `status: not_understood`
+
+## 任务：chat_regenerate
 
 目标：理解用户改片意图，应用 patch，重新渲染。
 

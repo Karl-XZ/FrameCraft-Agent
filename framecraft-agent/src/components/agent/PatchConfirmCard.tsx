@@ -1,11 +1,13 @@
 import React from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Check, X } from 'lucide-react';
 
 interface PatchConfirmCardProps {
   patch: Record<string, unknown>;
+  onAccept?: () => void;
+  onDiscard?: () => void;
 }
 
-export default function PatchConfirmCard({ patch }: PatchConfirmCardProps) {
+export default function PatchConfirmCard({ patch, onAccept, onDiscard }: PatchConfirmCardProps) {
   const ops = (patch.operations as Array<Record<string, unknown>>) || [];
 
   return (
@@ -28,6 +30,26 @@ export default function PatchConfirmCard({ patch }: PatchConfirmCardProps) {
         ))}
         {!ops.length && <p className="text-xs text-text-muted">将重新生成预览与剪映草稿</p>}
       </div>
+      {(onAccept || onDiscard) && (
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onAccept}
+            className="gradient-btn flex-1 px-3 py-2 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold"
+          >
+            <Check className="w-3.5 h-3.5" />
+            接受修改
+          </button>
+          <button
+            type="button"
+            onClick={onDiscard}
+            className="px-3 py-2 rounded-lg flex items-center justify-center gap-1.5 text-xs font-semibold bg-white/5 border border-white/10 text-text-secondary hover:text-text-main hover:bg-white/[0.08] transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+            撤销
+          </button>
+        </div>
+      )}
     </div>
   );
 }

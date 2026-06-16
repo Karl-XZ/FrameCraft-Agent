@@ -48,7 +48,7 @@ result = {{
 Path(r"{out_prefix}_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 print("OK")
 """
-    py = ASR_VENV_PYTHON if ASR_VENV_PYTHON.exists() else Path(sys.executable)
+    py = _asr_python()
     result = run_cmd([str(py), "-c", script], cwd=ROOT)
     if result.returncode != 0:
         raise RuntimeError(f"ASR failed: {result.stderr or result.stdout}")
@@ -58,6 +58,24 @@ print("OK")
     write_json(work_dir / "word_timestamps.json", data["words"])
     write_json(work_dir / "speech_segments.json", data["segments"])
     return data
+
+
+def _python_candidates() -> list[Path]:
+    out: list[Path] = []
+    if ASR_VENV_PYTHON.exists():
+        out.append(ASR_VENV_PYTHON)
+    out.append(Path(sys.executable))
+    return out
+
+
+def _asr_python() -> Path:
+    last_err = ""
+    for py in _python_candidates():
+        probe = run_cmd([str(py), "-c", "import faster_whisper"], cwd=ROOT)
+        if probe.returncode == 0:
+            return py
+        last_err = probe.stderr or probe.stdout
+    raise RuntimeError(f"ASR unavailable (faster_whisper): {last_err or 'no interpreter'}")
 
 
 def build_cut_candidates(segments: list[dict]) -> list[dict]:

@@ -2,7 +2,13 @@ node_modules/
 chrome/
 uploads/
 outputs/
-workspaces/
+workspaces/*
+!workspaces/_template/
+_hf_demo/
+vendor/hyperframes-student-kit/
+chat_*_result.txt
+patch_test.json
+config/.openclaw.runtime.patch.json
 .env
 .env.*
 !.env.example

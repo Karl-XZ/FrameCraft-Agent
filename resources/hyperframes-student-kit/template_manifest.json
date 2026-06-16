@@ -1,0 +1,201 @@
+{
+  "name": "FrameCraft HyperFrames Student Kit (absorbed)",
+  "version": "1.0.0",
+  "description": "可复用的高级口播短视频组件库。每个组件同时定义 HyperFrames 预览实现与剪映草稿导出策略，是 unified_timeline 中各元素的视觉规范来源。",
+  "hyperframes_version": "0.6.99",
+  "upstream": {
+    "repo": "nateherkai/hyperframes-student-kit",
+    "url": "https://github.com/nateherkai/hyperframes-student-kit",
+    "pinned_commit": "a89e704ffbad02ac71170755526e05432598be59",
+    "vendored_path": "vendor/hyperframes-student-kit",
+    "license": "MIT (代码与 composition)",
+    "absorbed_paradigm": [
+      "video-projects/may-shorts-19 (canonical 9:16 口播范式)",
+      ".claude/skills/short-form-video/SKILL.md (playbook)",
+      "compositions/captions.html (逐词 karaoke 三态机 DIM/ACTIVE/SPOKEN)",
+      "scene1-intro.html (mono kicker + slam + stamp clip-path 擦入)"
+    ],
+    "absorption_method": "模板吸收 + 统一时间线驱动（非黑盒运行）；技术范式/数值已改造进 backend/app/services/hyperframes_service.py",
+    "brand_assets_excluded": "AIS 品牌素材（logo/guideline）按 LICENSE 不可复用，已用通用配色/文案替换"
+  },
+  "components": [
+    {
+      "id": "hook_title",
+      "label": "Hook 大标题",
+      "timeline_role": "text",
+      "preview": "GSAP back.out 弹入 + 末尾淡出上移；font-weight 900，黄色高亮，强阴影",
+      "draft_export_mode": "native",
+      "draft_mapping": "add_text_impl(transform_y=0.66, font_color=#FACC15, intro=Fade_In)",
+      "params": ["text", "color", "duration"]
+    },
+    {
+      "id": "word_highlight_caption",
+      "label": "逐词高亮字幕 (karaoke)",
+      "timeline_role": "subtitle",
+      "preview": "caption-group + 每词 <span>，GSAP color 补间在 word.start/word.end 切换高亮/常态色",
+      "draft_export_mode": "native",
+      "draft_mapping": "复用 VectCutAPI pattern/001-words.py word_highlight（text_styles 字符区间换色）；当前实现降级为整句原生字幕以保证可编辑",
+      "params": ["words", "highlight_color", "normal_color"]
+    },
+    {
+      "id": "lower_third",
+      "label": "Lower-third 信息条",
+      "timeline_role": "text",
+      "preview": "左侧滑入，半透明深色底 + 蓝色竖条，主副标题",
+      "draft_export_mode": "native",
+      "draft_mapping": "add_text_impl(transform_x=-0.32, transform_y=-0.32, background_alpha=0.6)",
+      "params": ["title", "subtitle"]
+    },
+    {
+      "id": "progress_bar",
+      "label": "全片进度条",
+      "timeline_role": "shape",
+      "preview": "persistent-overlay，底部 width 0%→100% 线性补间",
+      "draft_export_mode": "baked_overlay",
+      "draft_mapping": "剪映无原生进度条，导出时省略/烘焙，以预览视频为准",
+      "params": ["color"]
+    },
+    {
+      "id": "broll_cutaway",
+      "label": "B-roll 插入镜头",
+      "timeline_role": "video|image",
+      "preview": "zoom_in 入场 + dissolve 转场",
+      "draft_export_mode": "native",
+      "draft_mapping": "add_video_track/add_image_impl(intro=Zoom_In, transition=Dissolve)",
+      "params": ["asset_id", "duration"]
+    },
+    {
+      "id": "ken_burns",
+      "label": "口播画面轻微推近",
+      "timeline_role": "video",
+      "preview": "GSAP scale 1.0→1.06",
+      "draft_export_mode": "native",
+      "draft_mapping": "add_video_keyframe_impl(uniform_scale 关键帧)",
+      "params": ["from", "to"]
+    },
+    {
+      "id": "keyword_pop",
+      "label": "关键词弹出",
+      "timeline_role": "text",
+      "preview": "大字号 back.out 弹跳入场 + 末尾放大淡出，居中偏上，强调色",
+      "draft_export_mode": "hyperframes_only",
+      "draft_mapping": "装饰性强调，草稿中省略（避免与字幕重复），以预览为准",
+      "params": ["text", "color"]
+    },
+    {
+      "id": "chapter_card",
+      "label": "章节标题卡",
+      "timeline_role": "text",
+      "preview": "编号(mono) + 竖条 + 标题，横幅从左滑入",
+      "draft_export_mode": "native_text",
+      "draft_mapping": "add_text_impl(transform_y=0.1, track=title) 原生可编辑标题",
+      "params": ["index", "title", "color"]
+    },
+    {
+      "id": "explainer_card",
+      "label": "图文解释卡片",
+      "timeline_role": "text",
+      "preview": "半透明卡片缩放淡入，标题 + 正文（可取自图片 OCR / 备注）",
+      "draft_export_mode": "native_text",
+      "draft_mapping": "add_text_impl(background_alpha=0.7) 正文原生可编辑；卡片底图仅预览",
+      "params": ["title", "body", "asset_id", "color"]
+    },
+    {
+      "id": "stat_block",
+      "label": "数字 / 价格 / 对比动画",
+      "timeline_role": "effect",
+      "preview": "大号数字 back.out 弹入 + 标签，右上滑入",
+      "draft_export_mode": "baked_overlay",
+      "draft_mapping": "计数/对比动画无法原生表达，烘焙为覆盖层或省略",
+      "params": ["value", "label", "color"]
+    },
+    {
+      "id": "annotation",
+      "label": "手绘圈选 / 箭头 / 标注",
+      "timeline_role": "effect",
+      "preview": "SVG 椭圆 stroke-dashoffset 描边动画，覆盖在产品截图上",
+      "draft_export_mode": "baked_overlay",
+      "draft_mapping": "矢量描边动画烘焙为覆盖层",
+      "params": ["shape", "asset_id", "color"]
+    },
+    {
+      "id": "end_cta",
+      "label": "结尾 CTA",
+      "timeline_role": "text",
+      "preview": "居中文案 + 脉冲按钮，back.out 弹入",
+      "draft_export_mode": "native_text",
+      "draft_mapping": "add_text_impl 文案原生可编辑；按钮样式仅预览",
+      "params": ["text", "color", "primary"]
+    },
+    {
+      "id": "sfx",
+      "label": "音效",
+      "timeline_role": "audio",
+      "preview": "在 hook / 章节开头点缀短音效（<audio>）",
+      "draft_export_mode": "native",
+      "draft_mapping": "add_audio_track(track=sfx) 原生音频；仅当上传了音效素材",
+      "params": ["asset_id", "volume"]
+    }
+  ],
+  "templates": [
+    {
+      "id": "modern_talking_head",
+      "name": "Modern Talking Head 高级口播",
+      "scenarios": "通用口播、观点表达、个人 IP",
+      "aspect_ratios": ["9:16", "1:1", "16:9"],
+      "inputs": "口播视频 + 可选 B-roll/图片 + 素材备注",
+      "required_assets": ["口播视频"],
+      "optional_assets": ["B-roll 视频", "图片", "BGM", "LOGO"],
+      "hyperframes_effects": ["hook_title", "word_highlight_caption", "lower_third", "progress_bar", "ken_burns", "keyword_pop", "chapter_card", "end_cta"],
+      "draft_export": "字幕/标题/章节/CTA 原生文本，视频图片音频原生，进度条烘焙",
+      "native_editable": true,
+      "needs_baked_overlay": true
+    },
+    {
+      "id": "product_demo",
+      "name": "Product Demo 产品介绍",
+      "scenarios": "产品功能演示、官网转视频、SaaS 介绍",
+      "aspect_ratios": ["9:16", "16:9"],
+      "inputs": "口播视频 + 产品界面录屏/截图 + 备注",
+      "required_assets": ["口播视频", "产品截图或录屏"],
+      "optional_assets": ["LOGO", "BGM", "音效"],
+      "hyperframes_effects": ["hook_title", "word_highlight_caption", "lower_third", "explainer_card", "stat_block", "annotation", "keyword_pop", "ken_burns", "end_cta"],
+      "draft_export": "解释卡/CTA 原生文本，标注与对比动画烘焙覆盖层，截图原生图片",
+      "native_editable": true,
+      "needs_baked_overlay": true
+    },
+    {
+      "id": "educational_explainer",
+      "name": "Educational Explainer 知识科普",
+      "scenarios": "课程切片、知识讲解、教程",
+      "aspect_ratios": ["9:16", "16:9", "1:1"],
+      "inputs": "口播视频 + 讲解配图 + 备注",
+      "required_assets": ["口播视频"],
+      "optional_assets": ["讲解配图", "B-roll", "BGM"],
+      "hyperframes_effects": ["hook_title", "word_highlight_caption", "chapter_card", "explainer_card", "stat_block", "keyword_pop", "lower_third", "progress_bar", "end_cta"],
+      "draft_export": "章节/解释卡/CTA 原生文本，流程/对比动画烘焙覆盖层",
+      "native_editable": true,
+      "needs_baked_overlay": true
+    },
+    {
+      "id": "viral_short",
+      "name": "Viral Short 爆款短视频",
+      "scenarios": "强 Hook、快节奏、比赛路演压缩版、探店种草",
+      "aspect_ratios": ["9:16"],
+      "inputs": "口播视频 + 快切 B-roll + 备注",
+      "required_assets": ["口播视频"],
+      "optional_assets": ["B-roll", "BGM", "音效"],
+      "hyperframes_effects": ["hook_title", "word_highlight_caption", "keyword_pop", "stat_block", "progress_bar", "ken_burns", "end_cta"],
+      "draft_export": "字幕/CTA 原生文本，关键词弹出与对比动画烘焙/省略",
+      "native_editable": true,
+      "needs_baked_overlay": true
+    }
+  ],
+  "draft_export_legend": {
+    "native": "导出为剪映/CapCut 原生可编辑元素（视频/图片/音频）",
+    "native_text": "导出为剪映原生可编辑文本/字幕",
+    "native_keyframe": "导出为剪映原生关键帧",
+    "baked_overlay": "复杂动效，导出时烘焙为覆盖层或省略",
+    "hyperframes_only": "仅在 HyperFrames 预览中呈现"
+  }
+}

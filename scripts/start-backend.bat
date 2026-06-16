@@ -1,6 +1,9 @@
 @echo off
 cd /d "%~dp0.."
-python -m venv backend\venv 2>nul
+if not exist backend\venv\Scripts\python.exe (
+  python -m venv backend\venv
+)
 call backend\venv\Scripts\activate
 pip install -r backend\requirements.txt -q
-uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+echo [FrameCraft] Starting backend with venv Python on http://127.0.0.1:8000
+backend\venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload

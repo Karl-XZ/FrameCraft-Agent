@@ -39,9 +39,17 @@ interface ProjectState {
   videoResolution: string;
   frameRate: number;
   targetDuration: number;
+  targetStyle: string;
+  outputLanguage: string;
+  generateDraft: boolean;
+  keepHyperframes: boolean;
   draftTarget: string;
   overallProgress: number;
   currentAnalyzeTask: string;
+  analyzeCompletedSteps: string[];
+  analyzeLogs: string[];
+  planProgress: number;
+  planSubstep: string | null;
   generateHyperFramesProgress: number;
   generateDraftProgress: number;
   taskText: string;
@@ -71,9 +79,17 @@ interface ProjectState {
   setVideoResolution: (v: string) => void;
   setFrameRate: (v: number) => void;
   setTargetDuration: (v: number) => void;
+  setTargetStyle: (v: string) => void;
+  setOutputLanguage: (v: string) => void;
+  setGenerateDraft: (v: boolean) => void;
+  setKeepHyperframes: (v: boolean) => void;
   setDraftTarget: (v: string) => void;
   setOverallProgress: (v: number) => void;
   setCurrentAnalyzeTask: (v: string) => void;
+  setAnalyzeCompletedSteps: (v: string[]) => void;
+  setAnalyzeLogs: (v: string[]) => void;
+  setPlanProgress: (v: number) => void;
+  setPlanSubstep: (v: string | null) => void;
   setGenerateHyperFramesProgress: (v: number) => void;
   setGenerateDraftProgress: (v: number) => void;
   setTaskText: (v: string) => void;
@@ -103,9 +119,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   videoResolution: '1080p正式导出',
   frameRate: 30,
   targetDuration: 60,
+  targetStyle: 'modern_talking_head',
+  outputLanguage: 'zh',
+  generateDraft: true,
+  keepHyperframes: true,
   draftTarget: '剪映兼容草稿',
   overallProgress: 0,
   currentAnalyzeTask: '等待开始',
+  analyzeCompletedSteps: [],
+  analyzeLogs: [],
+  planProgress: 0,
+  planSubstep: null,
   generateHyperFramesProgress: 0,
   generateDraftProgress: 0,
   taskText: '准备就绪',
@@ -135,9 +159,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setVideoResolution: (v) => set({ videoResolution: v }),
   setFrameRate: (v) => set({ frameRate: v }),
   setTargetDuration: (v) => set({ targetDuration: v }),
+  setTargetStyle: (v) => set({ targetStyle: v }),
+  setOutputLanguage: (v) => set({ outputLanguage: v }),
+  setGenerateDraft: (v) => set({ generateDraft: v }),
+  setKeepHyperframes: (v) => set({ keepHyperframes: v }),
   setDraftTarget: (v) => set({ draftTarget: v }),
   setOverallProgress: (v) => set({ overallProgress: v }),
   setCurrentAnalyzeTask: (v) => set({ currentAnalyzeTask: v }),
+  setAnalyzeCompletedSteps: (v) => set({ analyzeCompletedSteps: v }),
+  setAnalyzeLogs: (v) => set({ analyzeLogs: v }),
+  setPlanProgress: (v) => set({ planProgress: v }),
+  setPlanSubstep: (v) => set({ planSubstep: v }),
   setGenerateHyperFramesProgress: (v) => set({ generateHyperFramesProgress: v }),
   setGenerateDraftProgress: (v) => set({ generateDraftProgress: v }),
   setTaskText: (v) => set({ taskText: v }),
@@ -164,6 +196,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
       pendingPatch: null,
       error: null,
       overallProgress: 0,
+      analyzeCompletedSteps: [],
+      analyzeLogs: [],
+      planProgress: 0,
+      planSubstep: null,
       taskText: '准备就绪',
     }),
 }));

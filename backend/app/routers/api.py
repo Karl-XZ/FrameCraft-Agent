@@ -8,14 +8,31 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
+import uuid
+
+from ..config import OUTPUTS_DIR
 from ..database import SessionLocal, get_db
-from ..models import Asset, ChatMessage, Job, Project, ProjectVersion
+from ..models import Asset, ChatMessage, Job, JobStatus, Project, ProjectVersion
 from ..schemas import ApplyPatchIn, ChatIn, ChatOut, JobOut, ModelSettings, VersionOut
 from ..services.job_runner import job_runner
-from ..services.patch_service import build_patch_from_message
+from ..services.chat_service import handle_agent_chat
+from ..services.patch_service import validate_patch
 from ..utils import get_model_settings, read_json, set_setting
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def _tail_job_log(log_path: str | None, limit: int = 50) -> list[str]:
+    if not log_path:
+        return []
+    p = Path(log_path)
+    if not p.exists():
+        return []
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+        return lines[-limit:]
+    except Exception:
+        return []
 
 
 @router.patch("/assets/{asset_id}")
@@ -65,6 +82,7 @@ async def job_events(job_id: str, db: Session = Depends(get_db)):
                 job = local.query(Job).filter(Job.id == job_id).first()
                 if not job:
                     break
+                meta = job.meta or {}
                 payload = {
                     "id": job.id,
                     "status": job.status,
@@ -72,6 +90,10 @@ async def job_events(job_id: str, db: Session = Depends(get_db)):
                     "current_step": job.current_step,
                     "error_message": job.error_message,
                     "type": job.type,
+                    "completed_steps": meta.get("completed_steps") or [],
+                    "plan_substep": meta.get("plan_substep"),
+                    "plan_progress": meta.get("plan_progress"),
+                    "logs": _tail_job_log(job.log_path),
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 if job.status in {"completed", "failed", "cancelled"}:
@@ -178,15 +200,70 @@ def chat(project_id: str, body: ChatIn, db: Session = Depends(get_db)):
         content=body.message,
     )
     db.add(user_msg)
+
     timeline = {}
     if project.current_version_id:
         v = db.query(ProjectVersion).filter(ProjectVersion.id == project.current_version_id).first()
         if v and v.timeline_json_path:
             timeline = read_json(Path(v.timeline_json_path))
-    patch = build_patch_from_message(body.message, timeline)
-    reply = f"已理解你的修改：{body.message}\n\n将应用 {len(patch.get('operations', []))} 项 timeline 变更，并重新生成预览与剪映草稿。"
+
+    result = handle_agent_chat(body.message, timeline, project, db)
+
+    if result.status in ("needs_config", "chat", "not_understood"):
+        agent_msg = ChatMessage(
+            id=f"msg_{uuid.uuid4().hex[:10]}", project_id=project_id,
+            version_id=project.current_version_id, role="agent", content=result.reply,
+        )
+        db.add(agent_msg)
+        db.commit()
+        return ChatOut(
+            id=agent_msg.id, role="agent", content=result.reply,
+            patch=None, job_id=None, status=result.status, created_at=agent_msg.created_at,
+        )
+
+    patch = result.patch or {"operations": []}
+
+    ok, errors = (True, [])
+    if timeline:
+        try:
+            ok, errors = validate_patch(timeline, patch)
+        except Exception as exc:
+            reply = f"修改方案格式有误，无法校验：{exc}"
+            agent_msg = ChatMessage(
+                id=f"msg_{uuid.uuid4().hex[:10]}", project_id=project_id,
+                version_id=project.current_version_id, role="agent", content=reply,
+            )
+            db.add(agent_msg)
+            db.commit()
+            return ChatOut(id=agent_msg.id, role="agent", content=reply, patch=None, job_id=None, status="rejected", created_at=agent_msg.created_at)
+    if not ok:
+        reply = "这个修改暂时无法安全应用：\n- " + "\n- ".join(errors)
+        agent_msg = ChatMessage(
+            id=f"msg_{uuid.uuid4().hex[:10]}", project_id=project_id,
+            version_id=project.current_version_id, role="agent", content=reply,
+        )
+        db.add(agent_msg)
+        db.commit()
+        return ChatOut(id=agent_msg.id, role="agent", content=reply, patch=patch, job_id=None, status="rejected", created_at=agent_msg.created_at)
+
+    # 仅生成方案、等待用户确认（接受/撤销），不立即应用（需求 §11.3.6）
+    if not body.apply:
+        reply = result.reply
+        if not reply:
+            raise HTTPException(502, "Agent 未返回有效回复")
+        agent_msg = ChatMessage(
+            id=f"msg_{uuid.uuid4().hex[:10]}", project_id=project_id,
+            version_id=project.current_version_id, role="agent", content=reply,
+        )
+        db.add(agent_msg)
+        db.commit()
+        return ChatOut(id=agent_msg.id, role="agent", content=reply, patch=patch, job_id=None, status="proposed", created_at=agent_msg.created_at)
+
+    reply = result.reply
+    if not reply:
+        raise HTTPException(502, "Agent 未返回有效回复")
     agent_msg = ChatMessage(
-        id=f"msg_{__import__('uuid').uuid4().hex[:10]}",
+        id=f"msg_{uuid.uuid4().hex[:10]}",
         project_id=project_id,
         version_id=project.current_version_id,
         role="agent",
@@ -195,7 +272,7 @@ def chat(project_id: str, body: ChatIn, db: Session = Depends(get_db)):
     )
     db.add(agent_msg)
     job = Job(
-        id=f"job_{__import__('uuid').uuid4().hex[:12]}",
+        id=f"job_{uuid.uuid4().hex[:12]}",
         project_id=project_id,
         type="chat_regenerate",
         meta={"patch": patch, "message": body.message},
@@ -243,3 +320,90 @@ def patch_settings(body: ModelSettings, db: Session = Depends(get_db)):
     for k, v in data.items():
         set_setting(db, mapping[k], v)
     return ModelSettings(**get_model_settings(db))
+
+
+@router.get("/model-providers")
+def model_providers():
+    return {
+        "providers": [
+            {"id": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1"},
+            {"id": "anthropic", "label": "Anthropic", "base_url": "https://api.anthropic.com/v1"},
+            {"id": "deepseek", "label": "DeepSeek", "base_url": "https://api.deepseek.com/v1"},
+            {"id": "qwen", "label": "Qwen / DashScope", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+            {"id": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1"},
+            {"id": "local", "label": "本地模型 (Ollama/LM Studio)", "base_url": "http://127.0.0.1:11434/v1"},
+        ],
+        "text_models": ["gpt-4o", "gpt-4o-mini", "deepseek-chat", "qwen-max"],
+        "vision_models": ["gpt-4o", "gpt-4o-mini", "qwen-vl-max"],
+        "asr_models": ["base", "small", "medium", "large-v3"],
+    }
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status in {JobStatus.PENDING.value, JobStatus.RUNNING.value}:
+        job.status = JobStatus.CANCELLED.value
+        db.commit()
+    return {"ok": True, "status": job.status}
+
+
+@router.post("/projects/{project_id}/apply-patch", response_model=JobOut)
+def apply_patch_endpoint(project_id: str, body: ApplyPatchIn, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project or not project.current_version_id:
+        raise HTTPException(404, "Project or current version not found")
+    v = db.query(ProjectVersion).filter(ProjectVersion.id == project.current_version_id).first()
+    timeline = read_json(Path(v.timeline_json_path)) if v and v.timeline_json_path else {}
+    ok, errors = validate_patch(timeline, body.patch)
+    if not ok:
+        raise HTTPException(400, "patch 校验失败：" + "；".join(errors))
+    job = Job(
+        id=f"job_{uuid.uuid4().hex[:12]}", project_id=project_id, type="chat_regenerate",
+        meta={"patch": body.patch, "message": body.patch.get("description", "应用修改")},
+    )
+    db.add(job)
+    db.commit()
+    job_runner.submit(job.id)
+    return job
+
+
+@router.post("/projects/{project_id}/regenerate", response_model=JobOut)
+def regenerate(project_id: str, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    job = Job(id=f"job_{uuid.uuid4().hex[:12]}", project_id=project_id, type="generate", meta={})
+    db.add(job)
+    db.commit()
+    job_runner.submit(job.id)
+    return job
+
+
+@router.post("/projects/{project_id}/versions/{version_id}/activate")
+def activate_version(project_id: str, version_id: str, db: Session = Depends(get_db)):
+    """将项目当前版本切换到指定历史版本（用于撤销修改，需求 §11.3.6）。"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    v = db.query(ProjectVersion).filter(
+        ProjectVersion.id == version_id, ProjectVersion.project_id == project_id
+    ).first()
+    if not v:
+        raise HTTPException(404, "Version not found")
+    project.current_version_id = version_id
+    db.commit()
+    return {"ok": True, "current_version_id": version_id}
+
+
+@router.get("/projects/{project_id}/versions/{version_id}/import-guide")
+def import_guide(project_id: str, version_id: str, db: Session = Depends(get_db)):
+    v = db.query(ProjectVersion).filter(ProjectVersion.id == version_id).first()
+    if not v:
+        raise HTTPException(404)
+    guide = OUTPUTS_DIR / project_id / version_id / "draft" / "draft_import_guide.md"
+    if not guide.exists():
+        return {"content": "草稿导入说明尚未生成。"}
+    return {"content": guide.read_text(encoding="utf-8")}

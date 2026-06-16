@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "workflows": {
+    "landscape_left": {
+      "id": "landscape_left",
+      "label": "居左横版口播",
+      "aspect_ratio": "16:9",
+      "output": { "width": 1920, "height": 1080 },
+      "script": "scripts/build_landscape.py",
+      "doc": "居左横版口播视频生成工作流.md",
+      "select_when": "16:9 且源片为横屏或已有人像紧裁"
+    },
+    "fullscreen_landscape": {
+      "id": "fullscreen_landscape",
+      "label": "全屏横版口播",
+      "aspect_ratio": "16:9",
+      "output": { "width": 1920, "height": 1080 },
+      "script": "scripts/build_fullscreen.py",
+      "doc": "全屏横版口播视频生成工作流.md",
+      "select_when": "16:9 且源片为竖屏（需横裁铺满 + 左右侧栏动效）"
+    },
+    "vertical_pip": {
+      "id": "vertical_pip",
+      "label": "竖屏口播（裁切人物 + 下方动效）",
+      "aspect_ratio": "9:16",
+      "output": { "width": 1080, "height": 1920 },
+      "script": "scripts/build_vertical.py",
+      "doc": "竖屏口播视频生成工作流.md",
+      "select_when": "9:16 且源片含新闻 UI / 非纯净口播（pip 模式）"
+    }
+  },
+  "auto_select": {
+    "default_by_aspect": {
+      "16:9": "landscape_left",
+      "9:16": "vertical_pip",
+      "1:1": "landscape_left"
+    },
+    "portrait_source_override_16_9": "fullscreen_landscape",
+    "portrait_source_threshold": 1.15
+  }
+}

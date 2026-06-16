@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: framecraft-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./config:/app/config
+      - ./vendor:/app/vendor
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    container_name: framecraft-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# 说明：
+# - HyperFrames 渲染依赖 Node>=22 + Chromium，VectCutAPI 草稿导出与剪映本机集成依赖
+#   Windows 宿主，容器内默认走 FFmpeg 兜底预览。完整高级预览/草稿请在 Windows 宿主运行。
+# - 后端在进程内以线程池跑 JobRunner，无需独立 worker；如需横向扩展可拆分。

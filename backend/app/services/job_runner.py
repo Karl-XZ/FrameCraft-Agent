@@ -1,3 +1,4 @@
+"""Job 执行：唯一入口为 OpenClaw Agent，禁止固定流水线。"""
 from __future__ import annotations
 
 import threading
@@ -6,36 +7,77 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
 
-from ..config import OUTPUTS_DIR
+from ..config import OUTPUTS_DIR, WORKSPACES_DIR
 from ..database import SessionLocal
 from ..models import Job, JobStatus, Project, ProjectStatus, ProjectVersion
 from ..utils import read_json, write_json
-from .analyzer import analyze_project_assets
-from .draft_service import export_draft
-from .ffmpeg_preview import render_preview_ffmpeg
-from .hyperframes_service import generate_hyperframes_project, render_preview, zip_hyperframes
-from .patch_service import apply_patch, build_patch_from_message
-from .planner import plan_edit
-from .timeline_builder import build_timeline, save_timeline
+from .openclaw_runtime import run_openclaw_task
+
+ANALYZE_PIPELINE = (
+    "提取口播音频",
+    "Whisper 转录",
+    "分析口播结构",
+    "抽帧理解 B-roll",
+    "匹配素材备注",
+    "生成剪辑方案",
+)
+
+
+class JobCancelled(Exception):
+    pass
 
 
 class JobRunner:
     def __init__(self):
         self._lock = threading.Lock()
+        self._local = threading.local()
 
     def submit(self, job_id: str) -> None:
         thread = threading.Thread(target=self._run, args=(job_id,), daemon=True)
         thread.start()
 
+    def _log(self, message: str) -> None:
+        buf = getattr(self._local, "log", None)
+        if buf is None:
+            return
+        line = f"[{datetime.utcnow().isoformat(timespec='seconds')}] {message}"
+        buf.append(line)
+        log_file = getattr(self._local, "log_file", None)
+        if log_file:
+            try:
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception:
+                pass
+
     def _update(self, db: Session, job: Job, progress: float, step: str, status: str | None = None):
+        db.refresh(job)
+        if job.status == JobStatus.CANCELLED.value:
+            raise JobCancelled()
+
+        meta = dict(job.meta or {})
+        completed = list(meta.get("completed_steps") or [])
+        prev = (job.current_step or "").strip()
+        if prev and prev != step:
+            prev_base = prev.split(" · ", 1)[0]
+            if prev_base in ANALYZE_PIPELINE and prev_base not in completed:
+                completed.append(prev_base)
+        meta["completed_steps"] = completed
+
+        if step.startswith("生成剪辑方案"):
+            sub = step.split(" · ", 1)[1] if " · " in step else ""
+            meta["plan_substep"] = sub or None
+            meta["plan_progress"] = round(max(0.0, min(100.0, (progress - 90.0) * 10.0)))
+
+        job.meta = meta
         job.progress = progress
         job.current_step = step
         if status:
             job.status = status
         db.commit()
+        self._log(f"{progress:.0f}% · {step}")
 
     def _run(self, job_id: str):
         db = SessionLocal()
@@ -43,24 +85,53 @@ class JobRunner:
             job = db.query(Job).filter(Job.id == job_id).first()
             if not job:
                 return
+
+            log_dir = OUTPUTS_DIR / job.project_id / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"{job.id}.log"
+            self._local.log = []
+            self._local.log_file = log_file
+            job.log_path = str(log_file)
+            job.meta = {**(job.meta or {}), "completed_steps": [], "plan_progress": 0, "plan_substep": None}
             job.status = JobStatus.RUNNING.value
             job.started_at = datetime.utcnow()
             db.commit()
+            self._log(f"OpenClaw 任务开始 type={job.type} job={job.id}")
 
             if job.type == "analyze":
-                self._run_analyze(db, job)
+                self._dispatch_openclaw(db, job, "analyze")
             elif job.type == "generate":
-                self._run_generate(db, job)
+                self._dispatch_openclaw(db, job, "generate")
             elif job.type == "chat_regenerate":
-                self._run_chat_regenerate(db, job)
+                self._dispatch_openclaw(db, job, "chat_regenerate")
             else:
                 raise ValueError(f"Unknown job type {job.type}")
 
+            self._log("OpenClaw 任务完成")
+            db.refresh(job)
+            if job.type == "analyze":
+                meta = dict(job.meta or {})
+                completed = list(meta.get("completed_steps") or [])
+                if "生成剪辑方案" not in completed:
+                    completed.append("生成剪辑方案")
+                meta["completed_steps"] = completed
+                meta["plan_progress"] = 100
+                meta["plan_substep"] = None
+                job.meta = meta
             job.status = JobStatus.COMPLETED.value
             job.progress = 100
             job.completed_at = datetime.utcnow()
             db.commit()
+        except JobCancelled:
+            self._log("任务被取消")
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.status = JobStatus.CANCELLED.value
+                job.current_step = "已取消"
+                job.completed_at = datetime.utcnow()
+                db.commit()
         except Exception as e:
+            self._log(f"任务失败: {e}")
             job = db.query(Job).filter(Job.id == job_id).first()
             if job:
                 job.status = JobStatus.FAILED.value
@@ -72,186 +143,77 @@ class JobRunner:
                 db.commit()
         finally:
             db.close()
+            self._local.log = None
+            self._local.log_file = None
 
-    def _run_analyze(self, db: Session, job: Job):
+    def _dispatch_openclaw(self, db: Session, job: Job, task: str) -> None:
         project = db.query(Project).filter(Project.id == job.project_id).first()
-        project.status = ProjectStatus.ANALYZING.value
+        if not project:
+            raise RuntimeError("项目不存在")
+
+        if task == "analyze":
+            project.status = ProjectStatus.ANALYZING.value
+        elif task in ("generate", "chat_regenerate"):
+            project.status = ProjectStatus.RENDERING.value
         db.commit()
 
-        def on_step(step: str, progress: float):
-            self._update(db, job, progress, step)
+        meta = dict(job.meta or {})
+        extra = {k: v for k, v in meta.items() if k not in ("patch", "message")}
+        user_message = meta.get("message") if task == "chat_regenerate" else None
+        if task == "chat_regenerate" and meta.get("patch"):
+            extra["patch"] = meta["patch"]
 
-        manifest = analyze_project_assets(db, project.id, on_step)
-        project.status = ProjectStatus.PLANNING.value
-        db.commit()
-        on_step("生成剪辑方案", 95)
-        plan_edit(db, project.id, manifest, project.target_duration, project.target_style)
-        project.status = ProjectStatus.COMPLETED.value
-        db.commit()
+        self._update(db, job, 2, f"OpenClaw Agent · {task}")
 
-    def _run_generate(self, db: Session, job: Job):
-        project = db.query(Project).filter(Project.id == job.project_id).first()
-        project.status = ProjectStatus.RENDERING.value
-        db.commit()
-
-        analysis_dir = OUTPUTS_DIR / project.id / "analysis"
-        manifest = read_json(analysis_dir / "asset_manifest.json")
-        plan = read_json(analysis_dir / "edit_plan.json")
-
-        version_num = db.query(ProjectVersion).filter(ProjectVersion.project_id == project.id).count() + 1
-        version_id = f"ver_{uuid.uuid4().hex[:12]}"
-        version_dir = OUTPUTS_DIR / project.id / version_id
-        version_dir.mkdir(parents=True, exist_ok=True)
-
-        self._update(db, job, 15, "构建统一时间线")
-        timeline = build_timeline(
-            project.id, project.name, project.aspect_ratio, 30, plan, manifest
+        result = run_openclaw_task(
+            db,
+            job.project_id,
+            task,
+            job_id=job.id,
+            user_message=user_message,
+            extra=extra,
+            on_log=self._log,
         )
-        timeline_path = version_dir / "unified_timeline.json"
-        save_timeline(timeline_path, timeline)
+        if not result.ok:
+            raise RuntimeError(result.error or "OpenClaw Agent 执行失败")
 
-        self._update(db, job, 35, "生成 HyperFrames 工程", ProjectStatus.RENDERING.value)
-        hf_dir = generate_hyperframes_project(timeline, version_dir)
-        self._update(db, job, 55, "渲染 preview.mp4")
-        preview_path = version_dir / "preview.mp4"
-        try:
-            render_preview(hf_dir, preview_path, fps=30)
-        except Exception:
-            render_preview_ffmpeg(timeline, preview_path)
+        self._verify_task_outputs(db, job, task, result.reply)
 
-        self._update(db, job, 75, "导出剪映草稿", ProjectStatus.EXPORTING_DRAFT.value)
-        draft_zip = version_dir / "draft" / "draft.zip"
-        try:
-            draft_zip, _ = export_draft(timeline, version_dir / "draft")
-        except Exception as exc:
-            draft_zip.parent.mkdir(parents=True, exist_ok=True)
-            if not draft_zip.exists():
-                draft_zip.write_bytes(b"")
-            self._update(db, job, 78, f"草稿导出警告: {exc}")
+    def _verify_task_outputs(self, db: Session, job: Job, task: str, agent_reply: str) -> None:
+        pid = job.project_id
+        analysis = OUTPUTS_DIR / pid / "analysis"
 
-        self._update(db, job, 88, "生成字幕与封面")
-        srt_path = version_dir / "subtitles.srt"
-        self._write_srt(timeline, srt_path)
-        cover_path = version_dir / "cover.png"
-        self._write_cover(timeline, cover_path)
-        publish_path = version_dir / "publish_copy.json"
-        write_json(
-            publish_path,
-            {
-                "title": plan.get("hook", project.name),
-                "description": plan.get("video_concept", ""),
-                "tags": ["AI剪辑", "口播", "帧造Agent"],
-            },
-        )
-        hf_zip = version_dir / "hyperframes_project.zip"
-        zip_hyperframes(hf_dir, hf_zip)
+        if task == "analyze":
+            manifest = analysis / "asset_manifest.json"
+            plan = analysis / "edit_plan.json"
+            if not manifest.exists() or not plan.exists():
+                raise RuntimeError(
+                    "OpenClaw Agent 未产出必需分析文件（asset_manifest.json / edit_plan.json）。"
+                    f" Agent 回复：{agent_reply[:500]}"
+                )
+            project = db.query(Project).filter(Project.id == pid).first()
+            if project:
+                project.status = ProjectStatus.COMPLETED.value
+                db.commit()
+            self._update(db, job, 100, "Agent 分析完成")
+            return
 
-        version = ProjectVersion(
-            id=version_id,
-            project_id=project.id,
-            version_number=version_num,
-            timeline_json_path=str(timeline_path),
-            edit_plan_json_path=str(analysis_dir / "edit_plan.json"),
-            preview_video_path=str(preview_path) if preview_path.exists() else None,
-            hyperframes_path=str(hf_dir),
-            draft_zip_path=str(draft_zip) if draft_zip.exists() else None,
-            subtitles_path=str(srt_path),
-            cover_path=str(cover_path),
-            publish_copy_path=str(publish_path),
-            status="completed",
-        )
-        db.add(version)
-        project.current_version_id = version_id
-        project.status = ProjectStatus.COMPLETED.value
-        db.commit()
-        self._update(db, job, 100, "完成")
-
-    def _run_chat_regenerate(self, db: Session, job: Job):
-        project = db.query(Project).filter(Project.id == job.project_id).first()
-        meta = job.meta or {}
-        patch = meta.get("patch")
-        message = meta.get("message", "")
-        base_version_id = project.current_version_id
-        if not base_version_id:
-            raise RuntimeError("No current version")
-        base_version = db.query(ProjectVersion).filter(ProjectVersion.id == base_version_id).first()
-        timeline = read_json(Path(base_version.timeline_json_path))
-        if not patch:
-            patch = build_patch_from_message(message, timeline)
-        timeline = apply_patch(timeline, patch)
-
-        job.type = "generate"
-        version_num = db.query(ProjectVersion).filter(ProjectVersion.project_id == project.id).count() + 1
-        version_id = f"ver_{uuid.uuid4().hex[:12]}"
-        version_dir = OUTPUTS_DIR / project.id / version_id
-        version_dir.mkdir(parents=True, exist_ok=True)
-        timeline_path = version_dir / "unified_timeline.json"
-        save_timeline(timeline_path, timeline)
-
-        self._update(db, job, 40, "重新渲染 HyperFrames 预览")
-        hf_dir = generate_hyperframes_project(timeline, version_dir)
-        preview_path = version_dir / "preview.mp4"
-        try:
-            render_preview(hf_dir, preview_path)
-        except Exception:
-            render_preview_ffmpeg(timeline, preview_path)
-
-        self._update(db, job, 75, "重新导出剪映草稿")
-        try:
-            draft_zip, _ = export_draft(timeline, version_dir / "draft")
-        except Exception:
-            draft_zip = version_dir / "draft" / "draft.zip"
-            draft_zip.parent.mkdir(parents=True, exist_ok=True)
-            if not draft_zip.exists():
-                draft_zip.write_bytes(b"PK\x05\x06")
-        srt_path = version_dir / "subtitles.srt"
-        self._write_srt(timeline, srt_path)
-        cover_path = version_dir / "cover.png"
-        self._write_cover(timeline, cover_path)
-
-        version = ProjectVersion(
-            id=version_id,
-            project_id=project.id,
-            version_number=version_num,
-            timeline_json_path=str(timeline_path),
-            preview_video_path=str(preview_path) if preview_path.exists() else None,
-            hyperframes_path=str(hf_dir),
-            draft_zip_path=str(draft_zip) if draft_zip.exists() else None,
-            subtitles_path=str(srt_path),
-            cover_path=str(cover_path),
-            status="completed",
-        )
-        db.add(version)
-        project.current_version_id = version_id
-        project.status = ProjectStatus.COMPLETED.value
-        db.commit()
-
-    def _write_srt(self, timeline: dict, path: Path):
-        lines = []
-        idx = 1
-        for item in timeline.get("items", []):
-            if item.get("type") != "subtitle":
-                continue
-            start = self._fmt_time(item["timeline_start"])
-            end = self._fmt_time(item["timeline_end"])
-            lines.append(f"{idx}\n{start} --> {end}\n{item.get('text','')}\n")
-            idx += 1
-        path.write_text("\n".join(lines), encoding="utf-8")
-
-    def _fmt_time(self, sec: float) -> str:
-        h = int(sec // 3600)
-        m = int((sec % 3600) // 60)
-        s = int(sec % 60)
-        ms = int((sec - int(sec)) * 1000)
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-    def _write_cover(self, timeline: dict, path: Path):
-        project = timeline["project"]
-        img = Image.new("RGB", (project["width"], project["height"]), color=(13, 19, 33))
-        draw = ImageDraw.Draw(img)
-        title = (timeline.get("meta") or {}).get("hook") or project.get("name", "FrameCraft")
-        draw.text((80, project["height"] // 2), title[:30], fill=(250, 204, 21))
-        img.save(path, format="PNG")
+        if task in ("generate", "chat_regenerate"):
+            project = db.query(Project).filter(Project.id == pid).first()
+            if not project or not project.current_version_id:
+                raise RuntimeError(
+                    "OpenClaw Agent 未注册新版本（finalize_version）。"
+                    f" Agent 回复：{agent_reply[:500]}"
+                )
+            ver = db.query(ProjectVersion).filter(ProjectVersion.id == project.current_version_id).first()
+            preview = Path(ver.preview_video_path) if ver and ver.preview_video_path else None
+            if not preview or not preview.exists():
+                raise RuntimeError(
+                    f"版本 {project.current_version_id} 缺少 preview.mp4。"
+                    f" Agent 回复：{agent_reply[:500]}"
+                )
+            self._update(db, job, 100, "Agent 成片完成")
+            return
 
 
 job_runner = JobRunner()

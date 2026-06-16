@@ -1,12 +1,19 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Shield, Monitor, Zap } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { api } from '../../api/client';
 
-const PROVIDERS = ['OpenAI', 'Anthropic', 'Google', 'DeepSeek', 'Qwen', 'OpenRouter', '本地模型', '其他'];
 const RATIOS = ['9:16', '16:9', '1:1'];
 const RESOLUTIONS = ['720p快速预览', '1080p正式导出', '4K旗舰版'];
 const DRAFT_TARGETS = ['CapCut International', '剪映兼容草稿'];
+
+type ProviderOption = { id: string; label: string; base_url: string };
+
+const PROVIDER_DEFAULTS: Record<string, { text_model: string; vision_model: string }> = {
+  qwen: { text_model: 'qwen-max', vision_model: 'qwen-vl-max' },
+  deepseek: { text_model: 'deepseek-chat', vision_model: 'gpt-4o-mini' },
+  openai: { text_model: 'gpt-4o-mini', vision_model: 'gpt-4o-mini' },
+};
 
 export default function ModelSettingsDrawer() {
   const {
@@ -20,22 +27,56 @@ export default function ModelSettingsDrawer() {
     draftTarget, setDraftTarget,
   } = useProjectStore();
 
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [textModel, setTextModel] = useState('qwen-max');
+  const [visionModel, setVisionModel] = useState('qwen-vl-max');
+  const [baseUrl, setBaseUrl] = useState('https://dashscope.aliyuncs.com/compatible-mode/v1');
+  const [providerId, setProviderId] = useState('qwen');
+
   useEffect(() => {
     if (!showSettingsDrawer) return;
-    void api.getSettings().then((s) => {
-      if (s.provider) setModelProvider(s.provider);
+    void Promise.all([api.getSettings(), api.getModelProviders()]).then(([s, meta]) => {
+      const list = (meta.providers as ProviderOption[]) || [];
+      setProviders(list);
+      const pid = (s.provider as string) || 'openai';
+      setProviderId(pid);
+      const match = list.find((p) => p.id === pid);
+      setModelProvider(match?.label || pid);
       if (s.api_key) setApiKey(s.api_key);
+      if (s.text_model) setTextModel(s.text_model);
+      if (s.vision_model) setVisionModel(s.vision_model);
+      if (s.base_url) setBaseUrl(s.base_url);
+      else if (match?.base_url) setBaseUrl(match.base_url);
     });
   }, [showSettingsDrawer, setApiKey, setModelProvider]);
 
+  const providerButtons = useMemo(
+    () => (providers.length ? providers : [
+      { id: 'qwen', label: 'Qwen / DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      { id: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1' },
+    ]),
+    [providers],
+  );
+
+  const selectProvider = (p: ProviderOption) => {
+    setProviderId(p.id);
+    setModelProvider(p.label);
+    setBaseUrl(p.base_url);
+    const defaults = PROVIDER_DEFAULTS[p.id];
+    if (defaults) {
+      setTextModel(defaults.text_model);
+      setVisionModel(defaults.vision_model);
+    }
+  };
+
   const save = async () => {
     await api.saveSettings({
-      provider: modelProvider,
+      provider: providerId,
       api_key: apiKey,
-      text_model: 'gpt-4o-mini',
-      vision_model: 'gpt-4o-mini',
+      text_model: textModel,
+      vision_model: visionModel,
       asr_model: 'base',
-      base_url: '',
+      base_url: baseUrl,
     });
     setShowSettingsDrawer(false);
   };
@@ -44,15 +85,12 @@ export default function ModelSettingsDrawer() {
 
   return (
     <div className="fixed inset-0 z-50 flex">
-      {/* Scrim */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={() => setShowSettingsDrawer(false)}
       />
 
-      {/* Drawer */}
       <div className="relative ml-auto w-[480px] h-full glass-strong border-l border-white/10 flex flex-col animate-slide-in-right overflow-y-auto">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
@@ -69,30 +107,60 @@ export default function ModelSettingsDrawer() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
-          {/* Model Provider */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-text-main flex items-center gap-2">
               <Zap className="w-3.5 h-3.5 text-primary-light" />
               模型提供商
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {PROVIDERS.map((p) => (
+              {providerButtons.map((p) => (
                 <button
-                  key={p}
-                  onClick={() => setModelProvider(p)}
+                  key={p.id}
+                  onClick={() => selectProvider(p)}
                   className={`px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
-                    modelProvider === p
+                    providerId === p.id
                       ? 'bg-primary/15 text-primary-light border-primary/30'
                       : 'bg-white/4 text-text-secondary border-white/8 hover:border-white/15'
                   }`}
                 >
-                  {p}
+                  {p.label}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* API Key */}
+          <div className="space-y-3">
+            <label className="text-sm font-semibold text-text-main">API Base URL</label>
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/8 text-xs text-text-main font-mono focus:outline-none focus:border-primary/40"
+            />
+            <p className="text-xs text-text-muted">
+              Qwen 必须填 DashScope 兼容地址：
+              <span className="text-primary-light font-mono"> https://dashscope.aliyuncs.com/compatible-mode/v1</span>
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label className="text-xs text-text-muted">文本模型</label>
+              <input
+                value={textModel}
+                onChange={(e) => setTextModel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/8 text-sm text-text-main focus:outline-none focus:border-primary/40"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-text-muted">视觉模型</label>
+              <input
+                value={visionModel}
+                onChange={(e) => setVisionModel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/8 text-sm text-text-main focus:outline-none focus:border-primary/40"
+              />
+            </div>
+          </div>
+
           <div className="space-y-3">
             <label className="text-sm font-semibold text-text-main flex items-center gap-2">
               <Shield className="w-3.5 h-3.5 text-warning" />
@@ -108,17 +176,14 @@ export default function ModelSettingsDrawer() {
             <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/15">
               <Shield className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
               <p className="text-xs text-warning/90 leading-relaxed">
-                API Key 仅本地存储，不会传输到任何第三方服务器，请放心使用。
+                DashScope Key 仅存本地 SQLite，经 OpenAI 兼容 SDK 直连阿里云，不经过其他第三方。
               </p>
             </div>
           </div>
 
-          {/* Video Output */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-text-main">视频输出设置</label>
-
             <div className="space-y-3">
-              {/* Ratio */}
               <div>
                 <p className="text-xs text-text-muted mb-2">画面比例</p>
                 <div className="flex gap-2">
@@ -138,7 +203,6 @@ export default function ModelSettingsDrawer() {
                 </div>
               </div>
 
-              {/* Resolution */}
               <div>
                 <p className="text-xs text-text-muted mb-2">分辨率</p>
                 <div className="flex gap-2">
@@ -158,7 +222,6 @@ export default function ModelSettingsDrawer() {
                 </div>
               </div>
 
-              {/* Frame rate */}
               <div className="flex items-center justify-between">
                 <p className="text-xs text-text-muted">帧率</p>
                 <div className="flex items-center gap-3">
@@ -178,7 +241,6 @@ export default function ModelSettingsDrawer() {
                 </div>
               </div>
 
-              {/* Duration */}
               <div className="flex items-center justify-between">
                 <p className="text-xs text-text-muted">目标时长</p>
                 <div className="flex items-center gap-3">
@@ -200,7 +262,6 @@ export default function ModelSettingsDrawer() {
             </div>
           </div>
 
-          {/* Draft export */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-text-main">草稿导出目标</label>
             <div className="space-y-2">
@@ -228,13 +289,9 @@ export default function ModelSettingsDrawer() {
                 </button>
               ))}
             </div>
-            <p className="text-xs text-text-muted p-3 rounded-lg bg-white/4 border border-white/6">
-              剪映兼容草稿使用标准 XML 格式，可直接导入剪映专业版或手机版，无需额外转换。
-            </p>
           </div>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-white/8">
           <button type="button" onClick={() => void save()} className="gradient-btn w-full py-3 rounded-xl text-sm font-semibold">
             保存设置

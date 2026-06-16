@@ -1,20 +1,39 @@
 import React, { useState } from 'react';
 import { X, FileVideo, Image, Music, Hexagon, Tag, MessageSquare, Star, Volume2, Crop, Brain } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
+import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 import GradientButton from '../ui/GradientButton';
 
 const TAGS = ['口播视频', 'B-roll', '图片', '音频', 'LOGO'];
 
 export default function AssetDetailDrawer() {
   const { showAssetDrawer, setShowAssetDrawer, assets, selectedAssetId } = useProjectStore();
+  const { persistAsset } = useStudioWorkflow();
   const asset = assets.find((a) => a.id === selectedAssetId);
   const [note, setNote] = useState(asset?.note || '');
+  const [tag, setTag] = useState<string>(asset?.type || 'B-roll');
   const [mustUse, setMustUse] = useState(true);
   const [mute, setMute] = useState(false);
   const [allowCrop, setAllowCrop] = useState(true);
   const [priority, setPriority] = useState(7);
+  const [saving, setSaving] = useState(false);
 
   if (!showAssetDrawer || !asset) return null;
+
+  const onSave = async () => {
+    setSaving(true);
+    try {
+      await persistAsset(asset.id, {
+        user_label: tag,
+        user_note: note,
+        must_use: mustUse,
+        priority,
+      });
+      setShowAssetDrawer(false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const TypeIcon = asset.type === '口播视频' || asset.type === 'B-roll' ? FileVideo :
     asset.type === '图片' ? Image :
@@ -64,8 +83,9 @@ export default function AssetDetailDrawer() {
               {TAGS.map((t) => (
                 <button
                   key={t}
+                  onClick={() => setTag(t)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                    asset.type === t
+                    tag === t
                       ? 'bg-primary/15 text-primary-light border-primary/30'
                       : 'bg-white/4 text-text-secondary border-white/8 hover:border-white/15'
                   }`}
@@ -214,8 +234,8 @@ export default function AssetDetailDrawer() {
           >
             取消
           </button>
-          <GradientButton size="md" className="flex-1 rounded-xl">
-            保存
+          <GradientButton size="md" className="flex-1 rounded-xl" onClick={onSave} disabled={saving}>
+            {saving ? '保存中…' : '保存'}
           </GradientButton>
         </div>
       </div>

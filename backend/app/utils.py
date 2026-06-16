@@ -7,15 +7,19 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from .config import TEST_LLM_DEFAULTS
 from .models import PlatformSetting
 
 
 def get_setting(db: Session, key: str, default: str = "") -> str:
     row = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
-    if row:
+    if row and (row.value or "").strip():
         return row.value
     env_key = key.upper()
-    return os.getenv(env_key, default)
+    env_val = os.getenv(env_key, "")
+    if env_val.strip():
+        return env_val
+    return default
 
 
 def set_setting(db: Session, key: str, value: str) -> None:
@@ -27,14 +31,39 @@ def set_setting(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
+def seed_test_llm_defaults(db: Session) -> None:
+    """初始化默认模型配置（不含 API Key）。"""
+    if get_setting(db, "llm_model", "").strip():
+        return
+    mapping = {
+        "provider": "llm_provider",
+        "text_model": "llm_model",
+        "vision_model": "vlm_model",
+        "asr_model": "asr_model",
+        "base_url": "llm_base_url",
+    }
+    for field, db_key in mapping.items():
+        if not get_setting(db, db_key, "").strip():
+            set_setting(db, db_key, TEST_LLM_DEFAULTS[field])
+    env_key = (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("DASHSCOPE_API_KEY")
+        or ""
+    ).strip()
+    if env_key and not get_setting(db, "llm_api_key", "").strip():
+        set_setting(db, "llm_api_key", env_key)
+
+
 def get_model_settings(db: Session) -> dict:
+    d = TEST_LLM_DEFAULTS
     return {
-        "provider": get_setting(db, "llm_provider", "openai"),
-        "api_key": get_setting(db, "llm_api_key", os.getenv("OPENAI_API_KEY", "")),
-        "text_model": get_setting(db, "llm_model", "gpt-4o-mini"),
-        "vision_model": get_setting(db, "vlm_model", "gpt-4o-mini"),
-        "asr_model": get_setting(db, "asr_model", "base"),
-        "base_url": get_setting(db, "llm_base_url", os.getenv("OPENAI_BASE_URL", "")),
+        "provider": get_setting(db, "llm_provider", d["provider"]),
+        "api_key": get_setting(db, "llm_api_key", os.getenv("OPENAI_API_KEY", d["api_key"])),
+        "text_model": get_setting(db, "llm_model", d["text_model"]),
+        "vision_model": get_setting(db, "vlm_model", d["vision_model"]),
+        "asr_model": get_setting(db, "asr_model", d["asr_model"]),
+        "base_url": get_setting(db, "llm_base_url", os.getenv("OPENAI_BASE_URL", d["base_url"])),
     }
 
 

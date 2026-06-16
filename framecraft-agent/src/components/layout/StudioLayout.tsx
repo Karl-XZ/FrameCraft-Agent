@@ -19,6 +19,7 @@ import MiniTimeline from '../studio/MiniTimeline';
 import AgentChatPanel from '../agent/AgentChatPanel';
 import ModelSettingsDrawer from '../settings/ModelSettingsDrawer';
 import AssetDetailDrawer from '../asset/AssetDetailDrawer';
+import ProjectSelector from '../layout/ProjectSelector';
 import GradientButton from '../ui/GradientButton';
 
 export default function StudioLayout() {
@@ -27,7 +28,7 @@ export default function StudioLayout() {
     clearProject, setShowSettingsDrawer,
     setSelectedAssetId, setShowAssetDrawer,
     generateHyperFramesProgress, generateDraftProgress,
-    versions, currentVersionId, setCurrentVersionId, setPreviewUrl, setVersion, projectId, error,
+    versions, currentVersionId, setCurrentVersionId, setPreviewUrl, setVersion, error,
   } = useProjectStore();
   const { startAnalyze } = useStudioWorkflow();
 
@@ -156,10 +157,10 @@ export default function StudioLayout() {
             </div>
             <span className="text-sm font-bold text-text-main"><span className="gradient-text">帧造</span> Agent</span>
           </Link>
-          {projectId && <span className="text-[10px] text-text-muted font-mono">{projectId}</span>}
         </div>
         <StepProgress />
         <div className="flex items-center gap-2">
+          <ProjectSelector />
           <button type="button" onClick={() => setShowSettingsDrawer(true)} className="flex items-center gap-2 px-3 py-1.5 rounded-lg glass border border-white/10 text-xs text-text-secondary">
             <Settings className="w-3.5 h-3.5" /> 模型设置
           </button>

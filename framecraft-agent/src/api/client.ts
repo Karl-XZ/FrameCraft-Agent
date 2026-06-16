@@ -19,7 +19,12 @@ export interface BackendProject {
   aspect_ratio: string;
   target_style: string;
   target_duration: number;
+  output_language?: string;
+  generate_draft?: boolean;
+  keep_hyperframes?: boolean;
   current_version_id: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface BackendAsset {
@@ -46,6 +51,10 @@ export interface BackendJob {
   progress: number;
   current_step: string;
   error_message: string | null;
+  completed_steps?: string[];
+  plan_substep?: string | null;
+  plan_progress?: number;
+  logs?: string[];
 }
 
 export interface EditPlan {
@@ -68,9 +77,19 @@ export interface BackendVersion {
   cover_url: string | null;
 }
 
+export interface CreateProjectBody {
+  name: string;
+  aspect_ratio?: string;
+  target_duration?: number;
+  target_style?: string;
+  output_language?: string;
+  generate_draft?: boolean;
+  keep_hyperframes?: boolean;
+}
+
 export const api = {
   base: API_BASE,
-  createProject: (body: { name: string; aspect_ratio?: string; target_duration?: number }) =>
+  createProject: (body: CreateProjectBody) =>
     request<BackendProject>('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -78,9 +97,15 @@ export const api = {
         name: body.name,
         aspect_ratio: body.aspect_ratio || '9:16',
         target_duration: body.target_duration || 60,
-        target_style: 'modern_talking_head',
+        target_style: body.target_style || 'modern_talking_head',
+        output_language: body.output_language || 'zh',
+        generate_draft: body.generate_draft ?? true,
+        keep_hyperframes: body.keep_hyperframes ?? true,
       }),
     }),
+  getProject: (projectId: string) => request<BackendProject>(`/api/projects/${projectId}`),
+  deleteProject: (projectId: string) => request(`/api/projects/${projectId}`, { method: 'DELETE' }),
+  listProjects: () => request<BackendProject[]>('/api/projects'),
   listAssets: (projectId: string) => request<BackendAsset[]>(`/api/projects/${projectId}/assets`),
   uploadAsset: async (projectId: string, file: File, user_label = '', user_note = '') => {
     const fd = new FormData();
@@ -97,11 +122,29 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  analyze: (projectId: string) =>
-    request<BackendJob>(`/api/projects/${projectId}/assets/analyze`, { method: 'POST' }),
+  analyze: (projectId: string, opts?: { strategy?: string; platform?: string }) =>
+    request<BackendJob>(`/api/projects/${projectId}/assets/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts || {}),
+    }),
   getEditPlan: (projectId: string) => request<EditPlan>(`/api/projects/${projectId}/edit-plan`),
-  generate: (projectId: string) =>
-    request<BackendJob>(`/api/projects/${projectId}/generate`, { method: 'POST' }),
+  generate: (projectId: string, opts?: { resolution?: string; fps?: number; strategy?: string }) =>
+    request<BackendJob>(`/api/projects/${projectId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts || {}),
+    }),
+  applyPatch: (projectId: string, patch: Record<string, unknown>) =>
+    request<BackendJob>(`/api/projects/${projectId}/apply-patch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patch }),
+    }),
+  cancelJob: (jobId: string) => request(`/api/jobs/${jobId}/cancel`, { method: 'POST' }),
+  getImportGuide: (projectId: string, versionId: string) =>
+    request<{ content: string }>(`/api/projects/${projectId}/versions/${versionId}/import-guide`),
+  getModelProviders: () => request<Record<string, unknown>>('/api/model-providers'),
   getJob: (jobId: string) => request<BackendJob>(`/api/jobs/${jobId}`),
   watchJob: (jobId: string, onEvent: (job: BackendJob) => void) => {
     const es = new EventSource(`${API_BASE}/api/jobs/${jobId}/events`);
@@ -113,10 +156,15 @@ export const api = {
     return es;
   },
   listVersions: (projectId: string) => request<BackendVersion[]>(`/api/projects/${projectId}/versions`),
-  chat: (projectId: string, message: string) =>
-    request<{ id: string; role: string; content: string; patch?: Record<string, unknown>; job_id?: string }>(
+  chat: (projectId: string, message: string, apply = true) =>
+    request<{ id: string; role: string; content: string; patch?: Record<string, unknown>; job_id?: string; status?: string }>(
       `/api/projects/${projectId}/chat`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }) }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, apply }) }
+    ),
+  activateVersion: (projectId: string, versionId: string) =>
+    request<{ ok: boolean; current_version_id: string }>(
+      `/api/projects/${projectId}/versions/${versionId}/activate`,
+      { method: 'POST' }
     ),
   getChat: (projectId: string) =>
     request<Array<{ id: string; role: string; content: string; created_at: string }>>(`/api/projects/${projectId}/chat`),

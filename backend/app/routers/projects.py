@@ -10,10 +10,28 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from ..config import UPLOADS_DIR
+from ..config import (
+    ALLOWED_AUDIO_EXT,
+    ALLOWED_IMAGE_EXT,
+    ALLOWED_VIDEO_EXT,
+    MAX_ASSETS_PER_PROJECT,
+    MAX_AUDIO_BYTES,
+    MAX_IMAGE_BYTES,
+    MAX_PROJECT_TOTAL_BYTES,
+    MAX_VIDEO_BYTES,
+    UPLOADS_DIR,
+)
 from ..database import get_db
 from ..models import Asset, Job, Project
-from ..schemas import AssetOut, AssetUpdate, JobOut, ProjectCreate, ProjectOut, ProjectUpdate
+from ..schemas import (
+    AnalyzeRequest,
+    AssetOut,
+    GenerateRequest,
+    JobOut,
+    ProjectCreate,
+    ProjectOut,
+    ProjectUpdate,
+)
 from ..services.job_runner import job_runner
 from ..services.media import probe_media
 
@@ -51,6 +69,9 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
         aspect_ratio=body.aspect_ratio,
         target_style=body.target_style,
         target_duration=body.target_duration,
+        output_language=body.output_language,
+        generate_draft=body.generate_draft,
+        keep_hyperframes=body.keep_hyperframes,
     )
     db.add(project)
     db.commit()
@@ -113,22 +134,36 @@ async def upload_asset(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "Project not found")
+
+    existing = db.query(Asset).filter(Asset.project_id == project_id).all()
+    if len(existing) >= MAX_ASSETS_PER_PROJECT:
+        raise HTTPException(400, f"单项目素材数量上限为 {MAX_ASSETS_PER_PROJECT}")
+
     aid = f"asset_{uuid.uuid4().hex[:12]}"
     safe_name = Path(file.filename or "upload.bin").name
+    ext = Path(safe_name).suffix.lower()
+
+    mime = file.content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    if ext in ALLOWED_VIDEO_EXT or mime.startswith("video"):
+        ftype, limit = "video", MAX_VIDEO_BYTES
+    elif ext in ALLOWED_IMAGE_EXT or mime.startswith("image"):
+        ftype, limit = "image", MAX_IMAGE_BYTES
+    elif ext in ALLOWED_AUDIO_EXT or mime.startswith("audio"):
+        ftype, limit = "audio", MAX_AUDIO_BYTES
+    else:
+        raise HTTPException(400, f"不支持的文件类型：{ext or mime}")
+
+    content = await file.read()
+    if len(content) > limit:
+        raise HTTPException(400, f"文件超出大小限制（{limit // (1024 * 1024)}MB）")
+    total = sum(a.size for a in existing) + len(content)
+    if total > MAX_PROJECT_TOTAL_BYTES:
+        raise HTTPException(400, "项目素材总大小超出 3GB 限制")
+
     dest_dir = UPLOADS_DIR / project_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{aid}_{safe_name}"
-    content = await file.read()
     dest.write_bytes(content)
-    mime = file.content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
-    if mime.startswith("video"):
-        ftype = "video"
-    elif mime.startswith("image"):
-        ftype = "image"
-    elif mime.startswith("audio"):
-        ftype = "audio"
-    else:
-        ftype = "video"
     meta = probe_media(dest) if ftype in {"video", "audio"} else {}
     asset = Asset(
         id=aid,
@@ -152,11 +187,19 @@ async def upload_asset(
 
 
 @router.post("/{project_id}/assets/analyze", response_model=JobOut)
-def analyze_assets(project_id: str, db: Session = Depends(get_db)):
+def analyze_assets(project_id: str, body: AnalyzeRequest | None = None, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "Project not found")
-    job = Job(id=f"job_{uuid.uuid4().hex[:12]}", project_id=project_id, type="analyze")
+    if not db.query(Asset).filter(Asset.project_id == project_id).count():
+        raise HTTPException(400, "请先上传至少一个素材")
+    body = body or AnalyzeRequest()
+    job = Job(
+        id=f"job_{uuid.uuid4().hex[:12]}",
+        project_id=project_id,
+        type="analyze",
+        meta={"strategy": body.strategy, "platform": body.platform},
+    )
     db.add(job)
     db.commit()
     job_runner.submit(job.id)
@@ -164,11 +207,17 @@ def analyze_assets(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{project_id}/generate", response_model=JobOut)
-def generate_project(project_id: str, db: Session = Depends(get_db)):
+def generate_project(project_id: str, body: GenerateRequest | None = None, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(404, "Project not found")
-    job = Job(id=f"job_{uuid.uuid4().hex[:12]}", project_id=project_id, type="generate")
+    body = body or GenerateRequest()
+    job = Job(
+        id=f"job_{uuid.uuid4().hex[:12]}",
+        project_id=project_id,
+        type="generate",
+        meta={"resolution": body.resolution, "fps": body.fps, "strategy": body.strategy},
+    )
     db.add(job)
     db.commit()
     job_runner.submit(job.id)

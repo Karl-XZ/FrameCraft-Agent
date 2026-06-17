@@ -22,5 +22,9 @@ export default function StudioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <StudioLayout />;
+  return (
+    <div className="h-screen overflow-hidden">
+      <StudioLayout />
+    </div>
+  );
 }

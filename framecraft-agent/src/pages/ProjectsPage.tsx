@@ -42,7 +42,7 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-main relative overflow-hidden">
+    <div className="min-h-screen bg-bg-main relative overflow-x-hidden">
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-0 w-[600px] h-[600px] rounded-full animate-orb-1"
           style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.28), transparent 30%)' }} />

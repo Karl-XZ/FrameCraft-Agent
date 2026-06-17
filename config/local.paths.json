@@ -1,9 +1,9 @@
 {
   "jianying": {
-    "app_exe": "F:\\JianyingPro\\JianyingPro.exe",
-    "app_version": "9.7.1.13726",
-    "data_dir": "C:\\Users\\ZHOU\\AppData\\Local\\JianyingPro",
-    "draft_dir": "C:\\Users\\ZHOU\\AppData\\Local\\JianyingPro\\User Data\\Projects\\com.lveditor.draft",
+    "app_exe": "",
+    "app_version": "",
+    "data_dir": "C:\\Users\\<user>\\AppData\\Local\\JianyingPro",
+    "draft_dir": "C:\\Users\\<user>\\AppData\\Local\\JianyingPro\\User Data\\Projects\\com.lveditor.draft",
     "is_capcut_env": false
   },
   "capcut": {
@@ -11,7 +11,7 @@
     "draft_dir_hint": "C:\\Users\\<user>\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft"
   },
   "tools": {
-    "node_exe": "C:\\Users\\ZHOU\\AppData\\Local\\Programs\\node-v22.20.0-win-x64\\node.exe",
+    "node_exe": "C:\\Users\\<user>\\AppData\\Local\\Programs\\node-v22.20.0-win-x64\\node.exe",
     "node_version": "22.20.0",
     "node_min_version": "22.19.0",
     "openclaw_version": "2026.6.6",

@@ -11,7 +11,13 @@ from sqlalchemy import inspect, text
 from .config import OUTPUTS_DIR, UPLOADS_DIR
 from .database import Base, SessionLocal, engine
 from .routers import api, projects
-from .services.openclaw_runtime import GATEWAY_PORT, gateway_manager, install_gateway_exit_hooks, openclaw_available
+from .services.openclaw_runtime import (
+    GATEWAY_PORT,
+    ensure_gateway_auth_config,
+    gateway_manager,
+    install_gateway_exit_hooks,
+    openclaw_available,
+)
 from .utils import seed_test_llm_defaults
 
 logger = logging.getLogger(__name__)
@@ -62,6 +68,7 @@ async def lifespan(app: FastAPI):
     install_gateway_exit_hooks()
     if openclaw_available():
         try:
+            await asyncio.get_event_loop().run_in_executor(None, ensure_gateway_auth_config)
             logger.info("[Startup] 启动 OpenClaw Gateway 常驻进程...")
             await asyncio.get_event_loop().run_in_executor(None, gateway_manager.start)
             logger.info("[Startup] OpenClaw Gateway 已就绪")

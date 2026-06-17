@@ -9,7 +9,7 @@ import GradientButton from '../ui/GradientButton';
 
 export default function LandingHero() {
   return (
-    <div className="min-h-screen flex flex-col bg-bg-main relative overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-bg-main relative overflow-x-hidden">
       {/* Background orbs */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-0 w-[600px] h-[600px] rounded-full animate-orb-1"

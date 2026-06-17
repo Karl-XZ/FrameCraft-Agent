@@ -141,10 +141,8 @@ openclaw --version    # 期望 OpenClaw 2026.6.x
 npm install
 cd framecraft-agent && npm install && cd ..
 
-# 4. 后端 venv
-python -m venv backend\venv
-backend\venv\Scripts\activate
-pip install -r backend\requirements.txt
+# 4. 后端 venv + ASR + OpenClaw 网关配置（一键）
+powershell -ExecutionPolicy Bypass -File scripts\setup-deps.ps1
 
 # 5. 配置 API Key（任选其一）
 #    a) 启动后在 Web「模型设置」填写

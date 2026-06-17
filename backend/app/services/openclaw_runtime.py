@@ -225,6 +225,7 @@ def _openclaw_cmd() -> list[str]:
             node_candidates.append(str(Path(nvm_node) / "node.exe"))
         node_candidates.extend(
             [
+                str(Path(os.getenv("USERPROFILE", "")) / ".proto" / "bin" / "node.exe"),
                 str(Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "node-v22.20.0-win-x64" / "node.exe"),
                 str(Path("C:/nvm4w/nodejs/node.exe")),
                 shutil.which("node") or "",
@@ -287,6 +288,24 @@ def _openclaw_config_path() -> Path:
     return Path(os.getenv("OPENCLAW_CONFIG_PATH", Path.home() / ".openclaw" / "openclaw.json"))
 
 
+def ensure_gateway_auth_config() -> None:
+    """确保 OpenClaw 网关为本地 loopback 免凭证模式（与 gateway run --auth none 一致）。"""
+    patch_path = ROOT / "config" / "openclaw.gateway.patch.json"
+    if not patch_path.is_file():
+        return
+    config_dir = _openclaw_config_path().parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        _openclaw_cmd() + ["config", "patch", "--file", str(patch_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+
+
 def sync_openclaw_config(db: Session, *, force: bool = False) -> None:
     """将 FrameCraft 模型设置同步到 OpenClaw 配置。"""
     global _CONFIG_SYNC_KEY
@@ -318,6 +337,9 @@ def sync_openclaw_config(db: Session, *, force: bool = False) -> None:
             "defaults": {
                 "model": {"primary": f"dashscope/{text_model}"},
             }
+        },
+        "gateway": {
+            "auth": {"mode": "none"},
         },
     }
     patch_path = ROOT / "config" / ".openclaw.runtime.patch.json"
@@ -603,8 +625,8 @@ def run_openclaw_task(
     if job_id:
         env["FRAMECRAFT_JOB_ID"] = job_id
 
-    # 制片任务强制 --local：embedded 模式 bundle exec 工具；Gateway 在本环境常未就绪
-    production_tasks = ("analyze", "generate", "chat_regenerate", "lint_fix")
+    # 制片与对话统一 --local：embedded 模式稳定，避免 Gateway 凭证/握手问题
+    production_tasks = ("analyze", "generate", "chat_regenerate", "lint_fix", "chat")
     use_gateway = task not in production_tasks and gateway_manager.is_ready()
     local_flag = [] if use_gateway else ["--local"]
     if on_log:

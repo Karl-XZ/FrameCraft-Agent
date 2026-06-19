@@ -292,7 +292,7 @@ export function useStudioWorkflow() {
     [refreshVersions]
   );
 
-  // 发送消息给当前项目自己的 Codex agent：可问答，也可直接改片并生成新版本。
+  // 发送消息给当前项目自己的 Agent：可问答，也可直接改片并生成新版本。
   const sendChat = useCallback(
     async (message: string) => {
       const text = message.trim();
@@ -307,12 +307,12 @@ export function useStudioWorkflow() {
         return;
       }
       store.setChatBusy(true);
-      store.setTaskText('正在准备 Codex Agent 对话');
+      store.setTaskText('正在准备 Agent 对话');
       store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
       store.addChatMessage({
         id: crypto.randomUUID(),
         role: 'agent',
-        text: '已收到你的消息，正在连接当前项目的 Codex Agent。后续处理过程会直接显示在这里。',
+        text: '已收到你的消息，正在连接当前项目的 Agent。后续处理过程会直接显示在这里。',
         timestamp: Date.now(),
       });
       try {
@@ -322,7 +322,7 @@ export function useStudioWorkflow() {
           url.searchParams.set('project', projectId);
           window.history.replaceState(null, '', url.toString());
         }
-        store.setTaskText('Codex Agent 正在处理对话');
+        store.setTaskText('Agent 正在处理对话');
         const res = await api.chat(projectId, text, true);
         store.addChatMessage({
           id: res.id,
@@ -368,7 +368,7 @@ export function useStudioWorkflow() {
         store.addChatMessage({
           id: crypto.randomUUID(),
           role: 'agent',
-          text: `对话请求失败：${msg}\n\n请确认新版后端已启动，并且本机 Codex CLI 已登录可用。`,
+          text: `对话请求失败：${msg}\n\n请确认新版后端已启动，并且本机 Agent 已登录可用。`,
           timestamp: Date.now(),
         });
       }

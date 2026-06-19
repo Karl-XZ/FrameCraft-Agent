@@ -1,6 +1,6 @@
 # 视频内容分类与动效规则
 
-本文档定义 FrameCraft Codex 流程中的基础内容分类。Agent 在 `content_category=auto` 时会结合 `target_style`、素材备注、ASR 文本自动判断。
+本文档定义 FrameCraft Agent 流程中的基础内容分类。Agent 在 `content_category=auto` 时会结合 `target_style`、素材备注、ASR 文本自动判断。
 
 ## 1. 搞笑整活 `funny_reaction`
 
@@ -13,7 +13,7 @@
   - 梗图贴纸 `meme_sticker`
   - 爆点星芒 `impact_flash`
   - 表情爆点 `emoji_burst`
-- Codex 设计要求：
+- Agent 设计要求：
   - 允许更密集的表情/贴纸/反应卡，但必须像综艺包装一样分层：一个主反应、一个辅助梗、一个背景节奏元素。
   - 表情动画需要持续抖动、呼吸、弹跳或漂移，不能只是静态贴图。
   - 梗文案必须面向观众，使用简体中文短句，避免解释制作意图。
@@ -33,7 +33,7 @@
   - 流程图 `process_flow`
   - 数据块 `stat_block`
   - 解释卡 `explainer_card`
-- Codex 设计要求：
+- Agent 设计要求：
   - 表格、流程图、数据卡优先，装饰性贴纸降级。
   - 流程必须逐步出现；每一步出现后要给观众至少 1 秒阅读时间。
   - 若引用外部数据、机构名称、统计口径，左下角用小字标明出处。
@@ -70,7 +70,7 @@
   - 对照表 `compare_table`
   - 逻辑流程 `process_flow`
   - 数据块 `stat_block`
-- Codex 设计要求：
+- Agent 设计要求：
   - 把观点拆成“变量、对照、验证、结论”等结构块，而不是重复使用同一种卡片。
   - 流程图逐节点出现；对照表逐行出现；金句卡只用于真正的记忆点。
   - 非全屏横版要充分利用左侧信息区，安全前提下避免大面积空白。

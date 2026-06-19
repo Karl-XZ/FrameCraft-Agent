@@ -17,7 +17,7 @@ from . import store
 from .security import cors_origin_regex, cors_origins, get_access_token, require_access_token, token_help
 from .single_agent import ProjectBusyError, runner
 
-app = FastAPI(title="FrameCraft Single Codex Agent API")
+app = FastAPI(title="FrameCraft Single Agent API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins(),
@@ -69,7 +69,7 @@ class ApplyPatchIn(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "mode": "single-codex-agent"}
+    return {"ok": True, "mode": "single-agent"}
 
 
 @app.post("/api/projects")
@@ -209,7 +209,7 @@ def get_asset_analysis(asset_id: str):
     return {
         "ready": asset.get("analysis_status") == "completed",
         "asset_id": asset_id,
-        "auto_summary": asset.get("auto_summary", "由单一 Codex agent 在任务中分析。"),
+        "auto_summary": asset.get("auto_summary", "由单一 Agent 在任务中分析。"),
         "recommended_usage": asset.get("recommended_usage", []),
         "ocr_text": asset.get("ocr_text", ""),
         "vision_status": "agent-managed",
@@ -391,7 +391,7 @@ def chat(project_id: str, body: ChatIn):
                 "id": store.new_id("msg"),
                 "project_id": project_id,
                 "role": "agent",
-                "content": "这条消息已经收到，但 Codex Agent 没能启动。请检查后端日志或 Codex 登录状态后重试。",
+                "content": "这条消息已经收到，但 Agent 没能启动。请检查后端日志或本机 Agent 登录状态后重试。",
                 "status": "failed",
                 "created_at": store.now_iso(),
             })
@@ -401,7 +401,7 @@ def chat(project_id: str, body: ChatIn):
         "id": store.new_id("msg"),
         "project_id": project_id,
         "role": "agent",
-        "content": "已收到，我正在把这条消息交给当前项目的 Codex Agent。后续进度会直接显示在这里。",
+        "content": "已收到，我正在把这条消息交给当前项目的 Agent。后续进度会直接显示在这里。",
         "patch": None,
         "job_id": job["id"],
         "status": "running",
@@ -411,13 +411,13 @@ def chat(project_id: str, body: ChatIn):
     def accepted_op(data):
         data.setdefault("chat", {}).setdefault(project_id, []).append(accepted)
     store.mutate(accepted_op)
-    return accepted
+    return store.public_chat_message(accepted)
 
 
 @app.get("/api/projects/{project_id}/chat")
 def get_chat(project_id: str):
     _ensure_project(project_id)
-    return store.snapshot().get("chat", {}).get(project_id, [])
+    return [store.public_chat_message(message) for message in store.snapshot().get("chat", {}).get(project_id, [])]
 
 
 @app.get("/api/model-providers")
@@ -426,14 +426,14 @@ def model_providers():
         "providers": [
             {
                 "id": "codex",
-                "label": "Codex CLI",
+                "label": "本机 Agent",
                 "base_url": "",
-                "note": "模型、登录状态和工具权限由本机 Codex CLI 配置决定。",
+                "note": "模型、登录状态和工具权限由本机 Agent 运行时配置决定。",
             }
         ],
         "codex": {
-            "label": "Codex CLI",
-            "note": "新后端只启动一个 Codex supervisor agent；模型与登录状态由本机 Codex 配置决定。",
+            "label": "本机 Agent",
+            "note": "新后端只启动一个项目 Agent；模型与登录状态由本机 Agent 运行时配置决定。",
         }
     }
 
@@ -450,7 +450,7 @@ def save_settings(body: dict[str, str]):
         for key in allowed:
             if key in body:
                 data["settings"][key] = body[key]
-        # The current Codex backend does not need browser-submitted API keys.
+        # The current local-agent backend does not need browser-submitted API keys.
         # Do not persist or echo them from the public web UI.
         data["settings"]["api_key"] = ""
         return store.public_settings(data["settings"])

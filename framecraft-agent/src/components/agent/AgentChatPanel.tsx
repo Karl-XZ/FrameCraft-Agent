@@ -7,7 +7,7 @@ import QuickActionChips from './QuickActionChips';
 import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 
-const EMPTY_CHAT_HINT = `在下方输入消息，与 Codex Agent 对话。
+const EMPTY_CHAT_HINT = `在下方输入消息，与 Agent 对话。
 
 支持：调整剪辑节奏、修改字幕、替换 B-roll、调节 BGM 等。生成成片后可提出改片需求。`;
 

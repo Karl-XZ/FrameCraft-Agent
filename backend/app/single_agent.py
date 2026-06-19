@@ -51,7 +51,7 @@ class SingleAgentRunner:
 
     def start(self, project_id: str, job_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if not codex_available():
-            raise RuntimeError("Codex CLI 不可用。请先安装/登录 Codex，或设置 CODEX_BIN。")
+            raise RuntimeError("本机 Agent 运行时不可用。请先安装/登录本机 Agent，或设置运行时路径。")
         job_id = store.new_id("job")
         now = store.now_iso()
 
@@ -126,6 +126,7 @@ class SingleAgentRunner:
                 "exec",
                 "resume",
                 "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
                 "-c",
                 'approval_policy="never"',
                 "--skip-git-repo-check",
@@ -134,15 +135,12 @@ class SingleAgentRunner:
                 session_id,
                 prompt,
             ]
-            self._append_log(job_id, f"继续项目 Codex 会话：{session_id}", chat=True)
+            self._append_log(job_id, f"继续项目 Agent 会话：{session_id}", chat=True)
         else:
             cmd = codex_cmd() + [
                 "exec",
                 "--json",
-                "-s",
-                "workspace-write",
-                "--add-dir",
-                str(store.ROOT),
+                "--dangerously-bypass-approvals-and-sandbox",
                 "-c",
                 'approval_policy="never"',
                 "--skip-git-repo-check",
@@ -154,16 +152,16 @@ class SingleAgentRunner:
                 str(last_message),
                 prompt,
             ]
-            self._append_log(job_id, "创建新的项目 Codex 会话", chat=True)
+            self._append_log(job_id, "创建新的项目 Agent 会话", chat=True)
         try:
             proc, stdout_text, stderr_text = self._run_codex_process(job_id, cmd, store.ROOT, env)
         except subprocess.TimeoutExpired:
-            self._fail(job_id, "单一 Codex agent 超时（>7200s）。")
+            self._fail(job_id, "单一 Agent 超时（>7200s）。")
             return
         log_path = workspace / "codex.log"
         log_path.write_text((stdout_text or "") + "\n" + (stderr_text or ""), encoding="utf-8")
         if proc.returncode != 0:
-            self._fail(job_id, _tail(stdout_text, stderr_text) or f"Codex exit {proc.returncode}")
+            self._fail(job_id, _tail(stdout_text, stderr_text) or f"Agent exit {proc.returncode}")
             return
         current = store.snapshot()["jobs"].get(job_id, {})
         if current.get("status") == "needs_input":
@@ -262,17 +260,17 @@ class SingleAgentRunner:
             thread_id = str(event.get("thread_id") or "")
             if project_id and thread_id:
                 self._save_project_codex_session(project_id, thread_id)
-                self._append_log(job_id, f"Codex 会话已绑定：{thread_id}", chat=True)
+                self._append_log(job_id, f"Agent 会话已绑定：{thread_id}", chat=True)
             return
         if event_type == "turn.started":
-            self._append_log(job_id, "Codex Agent 已开始处理这一轮任务", chat=True)
+            self._append_log(job_id, "Agent 已开始处理这一轮任务", chat=True)
             return
         if event_type == "turn.completed":
             usage = event.get("usage") or {}
             if usage:
                 self._append_log(
                     job_id,
-                    "Codex Agent 本轮完成，token 用量："
+                    "Agent 本轮完成，token 用量："
                     f"输入 {usage.get('input_tokens', 0)}，输出 {usage.get('output_tokens', 0)}",
                 )
             return
@@ -304,15 +302,15 @@ class SingleAgentRunner:
         task = job["type"]
         payload = job.get("payload") or {}
         base = f"""
-你是 FrameCraft 项目背后的唯一 Codex supervisor agent。
+你是 FrameCraft 项目背后的唯一 Agent。
 
-这次任务从开始到结束只能由你这一轮 Codex 负责：服务端不会再把分析、生成、视觉复审、重做拆给其他 Codex agent。你可以使用本地命令和 `{tool}` 这些哑工具读写项目状态、更新进度、注册版本；但禁止再启动 `codex`、禁止创建子 agent、禁止把设计判断交给固定脚本冒充。
+这次任务从开始到结束只能由你这一轮 Agent 负责：服务端不会再把分析、生成、视觉复审、重做拆给其他 agent。你可以使用本地命令和 `{tool}` 这些哑工具读写项目状态、更新进度、注册版本；但禁止再启动新的 agent、禁止创建子 agent、禁止把设计判断交给固定脚本冒充。
 
 如果依赖、素材、HyperFrames 或视觉验收无法完成，不允许伪装成功。若问题需要用户补充信息或素材，例如缺少可靠逐字稿、源视频无法读取、用户需求互相冲突，必须先用 `write_chat` 在聊天里说明卡点、你已经尝试了什么、用户可以怎么补充；随后调用 `progress --status needs_input --progress 当前进度 --step "需要用户补充：..."`。只有系统错误、依赖损坏、越权请求、渲染无法修复等不可继续问题才让任务失败。
 
 禁止 FFmpeg 拼接兜底冒充 HyperFrames 成片；FFmpeg 只可用于探测、转码、抽帧等辅助。
 
-安全边界：你运行在 FrameCraft 项目沙盒内。不要读取、复制、扫描或删除项目目录之外的任何文件。即使在 FrameCraft 项目根内，也不要主动读取其他 `proj_*` 的上传目录、输出目录、聊天记录或其他 job 工作目录。用户上传素材、当前项目输出、当前 job 工作目录和文档参考已足够完成任务；任何越界需求都必须拒绝并说明原因。
+权限边界：用户通过访问口令进入后，当前任务允许你使用本机完整能力，包括安装/下载必要依赖、调用系统工具、使用网络、下载或加载 ASR 模型。不要读取、复制、扫描或删除与当前视频任务无关的个人文件；不要主动读取其他 `proj_*` 的上传目录、输出目录、聊天记录或其他 job 工作目录，除非用户明确要求并且任务确实需要。
 
 第一步必须执行：
 `{tool} read_state`
@@ -399,7 +397,7 @@ class SingleAgentRunner:
                 if not path.is_file()
             ]
             if missing:
-                self._fail(job_id, "单一 Codex agent 未产出必要分析文件：" + "；".join(missing))
+                self._fail(job_id, "单一 Agent 未产出必要分析文件：" + "；".join(missing))
                 return False
             return True
 
@@ -408,11 +406,11 @@ class SingleAgentRunner:
             version_id = project.get("current_version_id")
             version = data["versions"].get(version_id or "")
             if not version:
-                self._fail(job_id, "单一 Codex agent 未注册任何视频版本。")
+                self._fail(job_id, "单一 Agent 未注册任何视频版本。")
                 return False
             preview = Path(version.get("preview_path") or "")
             if not preview.is_file() or preview.stat().st_size < 1024:
-                self._fail(job_id, f"单一 Codex agent 注册的视频预览不存在或为空：{preview}")
+                self._fail(job_id, f"单一 Agent 注册的视频预览不存在或为空：{preview}")
                 return False
             version_dir = Path(version.get("version_dir") or "")
             missing_required = [
@@ -433,7 +431,7 @@ class SingleAgentRunner:
             if not any(path.exists() for path in hyperframes_markers):
                 missing_required.append("HyperFrames 工程或源码痕迹")
             if missing_required:
-                self._fail(job_id, "单一 Codex agent 未产出可复现渲染材料：" + "；".join(missing_required))
+                self._fail(job_id, "单一 Agent 未产出可复现渲染材料：" + "；".join(missing_required))
                 return False
             if project.get("generate_draft", True):
                 draft_path = Path(version.get("draft_path") or version_dir / "jianying_draft.zip")
@@ -452,7 +450,7 @@ class SingleAgentRunner:
                 for message in messages
             ):
                 self._clear_project_codex_session(project_id)
-                self._fail(job_id, "单一 Codex agent 未写入本轮对话回复。已清除该项目损坏的 Codex 会话，下次会自动创建新的项目会话。")
+                self._fail(job_id, "单一 Agent 未写入本轮对话回复。已清除该项目损坏的 Agent 会话，下次会自动创建新的项目会话。")
                 return False
             return True
 
@@ -464,7 +462,7 @@ class SingleAgentRunner:
             job["status"] = "running"
             job["started_at"] = store.now_iso()
             job["progress"] = 2
-            job["current_step"] = f"单一 Codex agent · {job['type']}"
+            job["current_step"] = f"单一 Agent · {job['type']}"
             return job
         store.mutate(op)
 
@@ -475,7 +473,7 @@ class SingleAgentRunner:
                 return job
             job["status"] = "completed"
             job["progress"] = 100
-            job["current_step"] = "单一 Codex agent 完成"
+            job["current_step"] = "单一 Agent 完成"
             job["completed_at"] = store.now_iso()
             job.setdefault("logs", []).append((final or "完成")[:2000])
             project = data["projects"][job["project_id"]]
@@ -522,7 +520,7 @@ class SingleAgentRunner:
                 "content": (
                     "Agent 这轮没有通过项目验收，已停止继续伪装完成。\n\n"
                     f"原因：{error[:3000]}\n\n"
-                    "你可以直接在这里继续发消息，让同一个项目 Codex 会话根据这个问题修正或补充信息后重跑。"
+                    "你可以直接在这里继续发消息，让同一个项目 Agent 会话根据这个问题修正或补充信息后重跑。"
                 ),
                 "status": "failed",
                 "created_at": store.now_iso(),

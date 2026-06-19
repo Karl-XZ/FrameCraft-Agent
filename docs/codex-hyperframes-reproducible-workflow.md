@@ -1,11 +1,11 @@
-# Codex + HyperFrames 可复现口播制片工作流
+# Agent + HyperFrames 可复现口播制片工作流
 
-本文档记录当前项目的标准制片方式：Codex agent 负责理解素材、设计版式、设计动画块与验收标准；服务端只负责执行工具、真实 HyperFrames 渲染和版本注册。
+本文档记录当前项目的标准制片方式：项目 Agent 负责理解素材、设计版式、设计动画块与验收标准；服务端只负责执行工具、真实 HyperFrames 渲染和版本注册。
 
 ## 1. 输入与分析
 
 1. 用户在网页前端新建项目并上传口播视频，可在素材备注里说明是否“完整保留人物表达、禁止遮挡脸部”。
-2. 点击分析或生成后，后端启动当前项目唯一的 Codex supervisor agent。
+2. 点击分析或生成后，后端启动或恢复当前项目唯一的 Agent。
 3. Agent 通过 `framecraft-tool.sh read_state` 读取当前项目素材、版本和聊天上下文。
 4. Agent 自行产出 `analysis.json` 与 `edit_plan.json`。
 5. 若存在主讲素材，`complete` 策略必须完整覆盖源视频：不得截取几秒循环，不得尾帧冻结。
@@ -19,7 +19,7 @@ Agent 必须先写事实层 timeline，再做视觉设计。事实层包含：
 - 字幕来自 ASR 原文，逐字/逐段对齐，不得总结改写。
 - `layout_variant` 与 `content_category` 从项目参数或 Agent 判断写入 meta。
 
-## 3. Codex 设计层
+## 3. Agent 设计层
 
 Agent 必须阅读自己产出的 timeline 后写设计说明、HyperFrames 项目源码和 QA 计划。后端不会提供固定设计流水线，也不会把旧模板拼接成片。
 
@@ -95,7 +95,7 @@ Agent 必须生成 HyperFrames 工程并用 HyperFrames 真实渲染 `preview.mp
 
 ## 8. 剪映草稿同步
 
-草稿导出由后端格式转换器完成，不由固定视频流水线生成视觉设计。Codex agent 仍然必须负责 timeline、字幕和 blocks 的内容设计；导出器只把这些结构写入剪映可以编辑的轨道。
+草稿导出由后端格式转换器完成，不由固定视频流水线生成视觉设计。项目 Agent 仍然必须负责 timeline、字幕和 blocks 的内容设计；导出器只把这些结构写入剪映可以编辑的轨道。
 
 当前可编辑草稿包含：
 

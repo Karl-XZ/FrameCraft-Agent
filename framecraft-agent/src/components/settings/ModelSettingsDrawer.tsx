@@ -10,7 +10,7 @@ const DRAFT_TARGETS = ['CapCut International', '剪映兼容草稿'];
 type ProviderOption = { id: string; label: string; base_url: string };
 
 const PROVIDER_DEFAULTS: Record<string, { text_model: string; vision_model: string }> = {
-  codex: { text_model: 'Codex CLI 当前配置', vision_model: 'Codex CLI 当前配置' },
+  codex: { text_model: '本机 Agent 当前配置', vision_model: '本机 Agent 当前配置' },
   qwen: { text_model: 'qwen-max', vision_model: 'qwen-vl-max' },
   deepseek: { text_model: 'deepseek-chat', vision_model: 'gpt-4o-mini' },
   openai: { text_model: 'gpt-4o-mini', vision_model: 'gpt-4o-mini' },
@@ -59,7 +59,7 @@ export default function ModelSettingsDrawer() {
 
   const providerButtons = useMemo(
     () => (providers.length ? providers : [
-      { id: 'codex', label: 'Codex CLI', base_url: '' },
+      { id: 'codex', label: '本机 Agent', base_url: '' },
       { id: 'qwen', label: 'Qwen / DashScope', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
       { id: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1' },
     ]),
@@ -145,7 +145,7 @@ export default function ModelSettingsDrawer() {
               className="w-full px-3 py-2.5 rounded-lg bg-white/5 border border-white/8 text-xs text-text-main font-mono focus:outline-none focus:border-primary/40"
             />
             <p className="text-xs text-text-muted">
-              新版后端使用本机 Codex CLI；这里保留 Base URL 仅用于兼容旧设置，不参与视频 agent 调度。
+              新版后端使用本机 Agent 运行时；这里保留 Base URL 仅用于兼容旧设置，不参与视频 agent 调度。
             </p>
           </div>
 
@@ -183,7 +183,7 @@ export default function ModelSettingsDrawer() {
             <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/15">
               <Shield className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
               <p className="text-xs text-warning/90 leading-relaxed">
-              新版后端不直接读取这里的 API Key。请在本机 Codex CLI 中完成登录；本设置仅保留为前端兼容项。
+              新版后端不直接读取这里的 API Key。请在本机 Agent 运行时中完成登录；本设置仅保留为前端兼容项。
               </p>
             </div>
           </div>

@@ -102,6 +102,35 @@ def snapshot() -> dict[str, Any]:
             return deepcopy(load_db())
 
 
+def sanitize_visible_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    replacements = (
+        ("Codex Agent", "Agent"),
+        ("Codex agent", "Agent"),
+        ("Codex supervisor agent", "Agent"),
+        ("Codex supervisor", "Agent"),
+        ("Codex CLI", "本机 Agent 运行时"),
+        ("Codex", "Agent"),
+        ("codex agent", "agent"),
+        ("codex", "agent"),
+    )
+    out = value
+    for src, dst in replacements:
+        out = out.replace(src, dst)
+    return out
+
+
+def sanitize_visible_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_visible_text(value)
+    if isinstance(value, list):
+        return [sanitize_visible_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_visible_payload(item) for key, item in value.items()}
+    return value
+
+
 def public_project(project: dict[str, Any]) -> dict[str, Any]:
     out = deepcopy(project)
     out.pop("agent_session_id", None)
@@ -122,7 +151,11 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     out.setdefault("plan_substep", None)
     out.setdefault("plan_progress", out.get("progress", 0))
     out.pop("payload", None)
-    return out
+    return sanitize_visible_payload(out)
+
+
+def public_chat_message(message: dict[str, Any]) -> dict[str, Any]:
+    return sanitize_visible_payload(deepcopy(message))
 
 
 def public_version(version: dict[str, Any]) -> dict[str, Any]:

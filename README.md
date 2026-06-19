@@ -1,23 +1,23 @@
 # FrameCraft Agent
 
-FrameCraft Agent 是一个口播视频制片工作台。当前新版保留原 React 前端，后端已重做为“轻 API 外壳 + 单一 Codex supervisor agent”架构。
+FrameCraft Agent 是一个口播视频制片工作台。当前新版保留原 React 前端，后端已重做为“轻 API 外壳 + 单一项目 Agent”架构。
 
 ## 当前架构
 
 ```text
 React 前端
   -> FastAPI 后端
-  -> 每个任务启动一个 Codex CLI supervisor agent
+  -> 每个任务启动或恢复一个项目 Agent
   -> agent 自己分析素材、设计动画、调用 HyperFrames、截图验收、注册版本
 ```
 
-后端只负责项目数据、文件上传、SSE 进度、版本文件服务和给 agent 暴露哑工具。剪辑判断、文案、动画设计、HyperFrames 工程生成和视觉复审都必须由同一个 Codex agent 在一次任务内完成。
+后端只负责项目数据、文件上传、SSE 进度、版本文件服务和给 agent 暴露哑工具。剪辑判断、文案、动画设计、HyperFrames 工程生成和视觉复审都必须由同一个项目 Agent 在一次任务内完成。
 
 ## 关键原则
 
-- `analyze`、`generate`、`apply_patch`、`chat` 每次任务只启动一个 Codex agent。
+- `analyze`、`generate`、`apply_patch`、`chat` 每次任务只启动或恢复一个项目 Agent。
 - 每个项目有独立 `agent_session_id`、素材目录、输出目录和聊天记录；同一项目同一时刻只允许一个运行中的 agent 任务。
-- Codex agent 以 `workspace-write` 沙盒运行，工具层会阻止越界读取或写入项目外文件。
+- Web API 仍由访问口令保护；口令通过后，项目 Agent 使用本机完整能力，避免 ASR、模型下载、系统工具调用被内部沙盒卡住。
 - 后端不再保留旧的固定流水线、旧 agent_tools、VectCutAPI 编排或 ASR 服务层。
 - `generate` 必须由 agent 完成分析、方案、HyperFrames 真渲染、逐块截图验收和版本注册。
 - 禁止 FFmpeg 拼接兜底冒充成片；FFmpeg 只可用于探测、转码、抽帧等辅助动作。
@@ -34,7 +34,7 @@ React 前端
 - `backend/venv` 中的 FastAPI 后端依赖
 - 项目根的 `hyperframes`
 - `framecraft-agent` 前端依赖
-- Codex CLI 可用性检查
+- 本机 Agent 运行时可用性检查
 
 ## 启动
 
@@ -83,7 +83,7 @@ curl http://127.0.0.1:8022/api/health
 预期返回：
 
 ```json
-{"ok":true,"mode":"single-codex-agent"}
+{"ok":true,"mode":"single-agent"}
 ```
 
 ## 任务产物门禁
@@ -121,11 +121,11 @@ curl http://127.0.0.1:8022/api/health
 FRAMECRAFT_ALLOWED_ORIGINS=https://your-domain.example
 ```
 
-公开 API 不会回传浏览器输入的 `api_key`，项目/素材/版本列表也不会回传服务端本机绝对路径。Codex CLI 的登录态由本机 Codex 管理，不通过前端 API 返回。
+公开 API 不会回传浏览器输入的 `api_key`，项目/素材/版本列表也不会回传服务端本机绝对路径。本机 Agent 的登录态由本机运行时管理，不通过前端 API 返回。
 
 ## Agent 工具
 
-每个 Codex 任务运行时会获得 `framecraft-tool.sh`，可调用：
+每个 Agent 任务运行时会获得 `framecraft-tool.sh`，可调用：
 
 - `read_state`
 - `progress`
@@ -160,5 +160,5 @@ FRAMECRAFT_ALLOWED_ORIGINS=https://your-domain.example
 
 ## 更多文档
 
-- [单一 Codex agent 后端说明](docs/single-codex-agent-backend.md)
-- [Codex + HyperFrames 可复现口播制片工作流](docs/codex-hyperframes-reproducible-workflow.md)
+- [单一 Agent 后端说明](docs/single-codex-agent-backend.md)
+- [Agent + HyperFrames 可复现口播制片工作流](docs/codex-hyperframes-reproducible-workflow.md)

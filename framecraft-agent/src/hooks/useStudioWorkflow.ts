@@ -274,8 +274,8 @@ export function useStudioWorkflow() {
   // 发送消息给当前项目自己的 Codex agent：可问答，也可直接改片并生成新版本。
   const sendChat = useCallback(
     async (message: string) => {
-      const projectId = store.projectId;
-      if (!projectId || !message.trim()) return;
+      const text = message.trim();
+      if (!text) return;
       if (store.activeJobId) {
         store.addChatMessage({
           id: crypto.randomUUID(),
@@ -285,11 +285,18 @@ export function useStudioWorkflow() {
         });
         return;
       }
-      store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text: message, timestamp: Date.now() });
       store.setChatBusy(true);
-      store.setTaskText('Codex Agent 正在处理对话');
+      store.setTaskText('正在准备 Codex Agent 对话');
       try {
-        const res = await api.chat(projectId, message, true);
+        const projectId = store.projectId || await ensureProject();
+        const url = new URL(window.location.href);
+        if (!url.searchParams.get('project')) {
+          url.searchParams.set('project', projectId);
+          window.history.replaceState(null, '', url.toString());
+        }
+        store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
+        store.setTaskText('Codex Agent 正在处理对话');
+        const res = await api.chat(projectId, text, true);
         store.addChatMessage({
           id: res.id,
           role: 'agent',
@@ -336,7 +343,7 @@ export function useStudioWorkflow() {
         });
       }
     },
-    [refreshChat, refreshVersions, store, watchJob]
+    [ensureProject, refreshChat, refreshVersions, store, watchJob]
   );
 
   // 接受修改方案：应用 patch 并重新生成

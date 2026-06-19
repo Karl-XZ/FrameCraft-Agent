@@ -109,6 +109,8 @@ def cmd_read_state(args: argparse.Namespace) -> None:
 
 def cmd_progress(args: argparse.Namespace) -> None:
     jid = _job_id()
+    pid = _project_id()
+    message = f"{args.progress:.0f}% {args.step}"
 
     def op(data):
         job = data["jobs"].get(jid)
@@ -118,7 +120,20 @@ def cmd_progress(args: argparse.Namespace) -> None:
         job["current_step"] = args.step
         job["status"] = args.status or job.get("status", "running")
         job["updated_at"] = store.now_iso()
-        job.setdefault("logs", []).append(f"{args.progress:.0f}% {args.step}")
+        job.setdefault("logs", []).append(message)
+        project = data["projects"].get(pid)
+        if project and args.status == "needs_input":
+            project["status"] = "needs_input"
+            project["updated_at"] = store.now_iso()
+        data.setdefault("chat", {}).setdefault(pid, []).append({
+            "id": store.new_id("msg"),
+            "project_id": pid,
+            "job_id": jid,
+            "role": "agent",
+            "content": message,
+            "status": args.status or "progress",
+            "created_at": store.now_iso(),
+        })
         return job
 
     job = store.mutate(op)
@@ -127,12 +142,22 @@ def cmd_progress(args: argparse.Namespace) -> None:
 
 def cmd_log(args: argparse.Namespace) -> None:
     jid = _job_id()
+    pid = _project_id()
 
     def op(data):
         job = data["jobs"].get(jid)
         if job:
             job.setdefault("logs", []).append(args.message)
             job["updated_at"] = store.now_iso()
+            data.setdefault("chat", {}).setdefault(pid, []).append({
+                "id": store.new_id("msg"),
+                "project_id": pid,
+                "job_id": jid,
+                "role": "agent",
+                "content": args.message,
+                "status": "log",
+                "created_at": store.now_iso(),
+            })
         return job
 
     _print({"ok": bool(store.mutate(op))})
@@ -233,6 +258,7 @@ def cmd_write_chat(args: argparse.Namespace) -> None:
     message = {
         "id": store.new_id("msg"),
         "project_id": pid,
+        "job_id": _job_id(),
         "role": "agent",
         "content": str(payload.get("content") or payload.get("reply") or ""),
         "patch": payload.get("patch"),

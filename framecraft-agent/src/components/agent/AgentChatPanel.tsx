@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Send, Bot } from 'lucide-react';
 import ChatMessageBubble from './ChatMessageBubble';
 import AgentTypingIndicator from './AgentTypingIndicator';
@@ -14,11 +14,16 @@ const EMPTY_CHAT_HINT = `在下方输入消息，与 Codex Agent 对话。
 export default function AgentChatPanel() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
   const { chatMessages, pendingPatch, versions, currentVersionId, chatBusy } = useProjectStore();
   const { sendChat, acceptPatch, discardPatch, revertToPreviousVersion } = useStudioWorkflow();
 
   const canRevert = versions.length > 1 && versions.findIndex((v) => v.id === currentVersionId) < versions.length - 1;
   const busy = sending || chatBusy;
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [chatMessages.length, busy, pendingPatch]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -68,6 +73,7 @@ export default function AgentChatPanel() {
               <ChatMessageBubble key={msg.id} role={msg.role} text={msg.text} />
             ))}
             {busy && <AgentTypingIndicator />}
+            <div ref={bottomRef} />
           </>
         )}
         {pendingPatch && (

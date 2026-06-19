@@ -9,7 +9,7 @@ import {
 } from '../api/client';
 import { useProjectStore, type Asset } from '../store/projectStore';
 
-const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled'];
+const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled', 'needs_input'];
 
 function mapChatMessage(m: BackendChatMessage) {
   return {
@@ -24,6 +24,7 @@ function mapChatMessage(m: BackendChatMessage) {
 export function useStudioWorkflow() {
   const store = useProjectStore();
   const jobEsRef = useRef<EventSource | null>(null);
+  const jobLogCountsRef = useRef<Record<string, number>>({});
 
   const ensureProject = useCallback(async () => {
     if (store.projectId) return store.projectId;
@@ -148,8 +149,24 @@ export function useStudioWorkflow() {
     (jobId: string, onDone?: (job: BackendJob) => void | Promise<void>, onTerminal?: (job: BackendJob) => void | Promise<void>) => {
       jobEsRef.current?.close();
       store.setActiveJobId(jobId);
+      jobLogCountsRef.current[jobId] = jobLogCountsRef.current[jobId] ?? 0;
       jobEsRef.current = api.watchJob(jobId, (job) => {
         store.setTaskText(job.current_step || '处理中');
+        const seenLogs = jobLogCountsRef.current[job.id] ?? 0;
+        const logs = job.logs || [];
+        if (logs.length > seenLogs) {
+          logs.slice(seenLogs).forEach((line, idx) => {
+            const text = String(line || '').trim();
+            if (!text) return;
+            store.addChatMessage({
+              id: `${job.id}-log-${seenLogs + idx}`,
+              role: 'agent',
+              text,
+              timestamp: Date.now(),
+            });
+          });
+          jobLogCountsRef.current[job.id] = logs.length;
+        }
         if (job.type === 'analyze' || store.step === 'analyze') {
           store.setOverallProgress(Math.round(job.progress));
           store.setCurrentAnalyzeTask(job.current_step || '处理中');
@@ -166,6 +183,10 @@ export function useStudioWorkflow() {
         }
         if (job.status === 'failed') {
           store.setError(job.error_message || '任务失败');
+        }
+        if (job.status === 'needs_input') {
+          store.setTaskText(job.current_step || '需要用户补充信息');
+          store.setError(null);
         }
         if (job.status === 'completed') {
           void Promise.resolve(onDone?.(job)).catch((e) => {
@@ -287,6 +308,13 @@ export function useStudioWorkflow() {
       }
       store.setChatBusy(true);
       store.setTaskText('正在准备 Codex Agent 对话');
+      store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
+      store.addChatMessage({
+        id: crypto.randomUUID(),
+        role: 'agent',
+        text: '已收到你的消息，正在连接当前项目的 Codex Agent。后续处理过程会直接显示在这里。',
+        timestamp: Date.now(),
+      });
       try {
         const projectId = store.projectId || await ensureProject();
         const url = new URL(window.location.href);
@@ -294,7 +322,6 @@ export function useStudioWorkflow() {
           url.searchParams.set('project', projectId);
           window.history.replaceState(null, '', url.toString());
         }
-        store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
         store.setTaskText('Codex Agent 正在处理对话');
         const res = await api.chat(projectId, text, true);
         store.addChatMessage({
@@ -318,13 +345,16 @@ export function useStudioWorkflow() {
             },
             async (job) => {
               store.setChatBusy(false);
-              if (job.status === 'failed') {
-                await refreshChat(projectId).catch(() => undefined);
-                store.addChatMessage({
-                  id: crypto.randomUUID(),
-                  role: 'agent',
-                  text: `对话任务失败：${job.error_message || '未知错误'}`,
-                  timestamp: Date.now(),
+              if (job.status === 'failed' || job.status === 'needs_input') {
+                await refreshChat(projectId).catch(() => {
+                  if (job.status === 'failed') {
+                    store.addChatMessage({
+                      id: crypto.randomUUID(),
+                      role: 'agent',
+                      text: `对话任务未完成：${job.error_message || '请查看上方 Agent 日志。'}`,
+                      timestamp: Date.now(),
+                    });
+                  }
                 });
               }
             },

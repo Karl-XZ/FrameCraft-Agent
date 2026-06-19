@@ -16,7 +16,7 @@ export default function ChatMessageBubble({ role, text }: ChatMessageBubbleProps
         </div>
       )}
       <div
-        className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+        className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
           isUser
             ? 'bg-primary/20 text-text-main rounded-tr-sm border border-primary/20'
             : 'glass rounded-tl-sm text-text-secondary'

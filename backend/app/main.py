@@ -78,7 +78,7 @@ def create_project(body: ProjectIn):
     now = store.now_iso()
     project = {
         "id": pid,
-        "agent_session_id": store.new_id("agent"),
+        "agent_session_id": None,
         "name": body.name,
         "status": "uploading",
         "aspect_ratio": body.aspect_ratio,
@@ -262,7 +262,7 @@ def get_active_project_job(project_id: str):
     _ensure_project(project_id)
     jobs = [
         j for j in store.snapshot()["jobs"].values()
-        if j.get("project_id") == project_id and j.get("status") not in {"completed", "failed", "cancelled"}
+        if j.get("project_id") == project_id and j.get("status") not in {"completed", "failed", "cancelled", "needs_input"}
     ]
     jobs.sort(key=lambda j: j.get("created_at") or "", reverse=True)
     return store.public_job(jobs[0]) if jobs else None
@@ -383,16 +383,35 @@ def chat(project_id: str, body: ChatIn):
     def op(data):
         data.setdefault("chat", {}).setdefault(project_id, []).append(user)
     store.mutate(op)
-    job = _start_job(project_id, "chat", {"message": body.message, "apply": body.apply})
-    return {
+    try:
+        job = _start_job(project_id, "chat", {"message": body.message, "apply": body.apply})
+    except Exception:
+        def failed_op(data):
+            data.setdefault("chat", {}).setdefault(project_id, []).append({
+                "id": store.new_id("msg"),
+                "project_id": project_id,
+                "role": "agent",
+                "content": "这条消息已经收到，但 Codex Agent 没能启动。请检查后端日志或 Codex 登录状态后重试。",
+                "status": "failed",
+                "created_at": store.now_iso(),
+            })
+        store.mutate(failed_op)
+        raise
+    accepted = {
         "id": store.new_id("msg"),
+        "project_id": project_id,
         "role": "agent",
-        "content": "已交给单一 Codex agent 处理；请在任务进度完成后查看回复或新版本。",
+        "content": "已收到，我正在把这条消息交给当前项目的 Codex Agent。后续进度会直接显示在这里。",
         "patch": None,
         "job_id": job["id"],
         "status": "running",
         "created_at": store.now_iso(),
     }
+
+    def accepted_op(data):
+        data.setdefault("chat", {}).setdefault(project_id, []).append(accepted)
+    store.mutate(accepted_op)
+    return accepted
 
 
 @app.get("/api/projects/{project_id}/chat")

@@ -4,13 +4,19 @@ import os
 import shutil
 import subprocess
 import threading
+import json
+import queue
+import re
 from pathlib import Path
 from typing import Any
 
 from . import store
 
 CODEX_BIN = os.getenv("CODEX_BIN", "codex")
-TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "needs_input"}
+_CODEX_THREAD_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 class ProjectBusyError(RuntimeError):
@@ -114,48 +120,172 @@ class SingleAgentRunner:
                 str(workspace),
             ]
         )
-        cmd = codex_cmd() + [
-            "exec",
-            "--json",
-            "-s",
-            "workspace-write",
-            "--add-dir",
-            str(store.ROOT),
-            "-c",
-            'approval_policy="never"',
-            "--skip-git-repo-check",
-            "--ephemeral",
-            "--color",
-            "never",
-            "-C",
-            str(workspace),
-            "-o",
-            str(last_message),
-            prompt,
-        ]
+        session_id = self._project_codex_session(project_id)
+        if session_id:
+            cmd = codex_cmd() + [
+                "exec",
+                "resume",
+                "--json",
+                "-c",
+                'approval_policy="never"',
+                "--skip-git-repo-check",
+                "-o",
+                str(last_message),
+                session_id,
+                prompt,
+            ]
+            self._append_log(job_id, f"继续项目 Codex 会话：{session_id}", chat=True)
+        else:
+            cmd = codex_cmd() + [
+                "exec",
+                "--json",
+                "-s",
+                "workspace-write",
+                "--add-dir",
+                str(store.ROOT),
+                "-c",
+                'approval_policy="never"',
+                "--skip-git-repo-check",
+                "--color",
+                "never",
+                "-C",
+                str(store.ROOT),
+                "-o",
+                str(last_message),
+                prompt,
+            ]
+            self._append_log(job_id, "创建新的项目 Codex 会话", chat=True)
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=7200,
-                cwd=str(workspace),
-                env=env,
-                encoding="utf-8",
-                errors="replace",
-            )
+            proc, stdout_text, stderr_text = self._run_codex_process(job_id, cmd, store.ROOT, env)
         except subprocess.TimeoutExpired:
             self._fail(job_id, "单一 Codex agent 超时（>7200s）。")
             return
         log_path = workspace / "codex.log"
-        log_path.write_text((proc.stdout or "") + "\n" + (proc.stderr or ""), encoding="utf-8")
+        log_path.write_text((stdout_text or "") + "\n" + (stderr_text or ""), encoding="utf-8")
         if proc.returncode != 0:
-            self._fail(job_id, _tail(proc.stdout, proc.stderr) or f"Codex exit {proc.returncode}")
+            self._fail(job_id, _tail(stdout_text, stderr_text) or f"Codex exit {proc.returncode}")
+            return
+        current = store.snapshot()["jobs"].get(job_id, {})
+        if current.get("status") == "needs_input":
+            self._finish_needs_input(job_id)
             return
         final = last_message.read_text(encoding="utf-8") if last_message.exists() else ""
         if not self._validate_outputs(job_id):
             return
         self._complete(job_id, final)
+
+    def _project_codex_session(self, project_id: str) -> str | None:
+        project = store.snapshot()["projects"].get(project_id) or {}
+        session_id = str(project.get("agent_session_id") or "").strip()
+        return session_id if _CODEX_THREAD_RE.match(session_id) else None
+
+    def _save_project_codex_session(self, project_id: str, session_id: str) -> None:
+        if not _CODEX_THREAD_RE.match(session_id):
+            return
+
+        def op(data):
+            project = data["projects"].get(project_id)
+            if project:
+                project["agent_session_id"] = session_id
+                project["updated_at"] = store.now_iso()
+            return project
+
+        store.mutate(op)
+
+    def _clear_project_codex_session(self, project_id: str) -> None:
+        def op(data):
+            project = data["projects"].get(project_id)
+            if project:
+                project["agent_session_id"] = None
+                project["updated_at"] = store.now_iso()
+            return project
+
+        store.mutate(op)
+
+    def _run_codex_process(
+        self,
+        job_id: str,
+        cmd: list[str],
+        workspace: Path,
+        env: dict[str, str],
+    ) -> tuple[subprocess.Popen[str], str, str]:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(workspace),
+            env=env,
+            encoding="utf-8",
+            errors="replace",
+        )
+        stderr_q: queue.Queue[str] = queue.Queue()
+
+        def read_stderr() -> None:
+            if not proc.stderr:
+                return
+            for line in proc.stderr:
+                stderr_q.put(line)
+
+        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        stderr_thread.start()
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        try:
+            if proc.stdout:
+                for line in proc.stdout:
+                    stdout_chunks.append(line)
+                    self._handle_codex_event(job_id, line)
+            proc.wait(timeout=7200)
+            stderr_thread.join(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise
+        while not stderr_q.empty():
+            stderr_chunks.append(stderr_q.get_nowait())
+        return proc, "".join(stdout_chunks), "".join(stderr_chunks)
+
+    def _handle_codex_event(self, job_id: str, line: str) -> None:
+        raw = line.strip()
+        if not raw:
+            return
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            self._append_log(job_id, raw[-1200:])
+            return
+        event_type = event.get("type")
+        data = store.snapshot()
+        job = data["jobs"].get(job_id) or {}
+        project_id = job.get("project_id")
+        if event_type == "thread.started":
+            thread_id = str(event.get("thread_id") or "")
+            if project_id and thread_id:
+                self._save_project_codex_session(project_id, thread_id)
+                self._append_log(job_id, f"Codex 会话已绑定：{thread_id}", chat=True)
+            return
+        if event_type == "turn.started":
+            self._append_log(job_id, "Codex Agent 已开始处理这一轮任务", chat=True)
+            return
+        if event_type == "turn.completed":
+            usage = event.get("usage") or {}
+            if usage:
+                self._append_log(
+                    job_id,
+                    "Codex Agent 本轮完成，token 用量："
+                    f"输入 {usage.get('input_tokens', 0)}，输出 {usage.get('output_tokens', 0)}",
+                )
+            return
+        if event_type == "item.completed":
+            item = event.get("item") or {}
+            item_type = item.get("type")
+            if item_type == "agent_message":
+                text = str(item.get("text") or "").strip()
+                if text:
+                    self._append_log(job_id, text[-4000:], chat=True)
+            elif item_type in {"command_execution", "tool_call"}:
+                summary = str(item.get("command") or item.get("name") or item_type)
+                self._append_log(job_id, f"执行工具：{summary[:500]}")
 
     def _write_tool_wrapper(self, workspace: Path) -> Path:
         tool = workspace / "framecraft-tool.sh"
@@ -178,7 +308,9 @@ class SingleAgentRunner:
 
 这次任务从开始到结束只能由你这一轮 Codex 负责：服务端不会再把分析、生成、视觉复审、重做拆给其他 Codex agent。你可以使用本地命令和 `{tool}` 这些哑工具读写项目状态、更新进度、注册版本；但禁止再启动 `codex`、禁止创建子 agent、禁止把设计判断交给固定脚本冒充。
 
-如果依赖、素材、HyperFrames 或视觉验收无法完成，必须让任务失败并说明原因。禁止 FFmpeg 拼接兜底冒充 HyperFrames 成片；FFmpeg 只可用于探测、转码、抽帧等辅助。
+如果依赖、素材、HyperFrames 或视觉验收无法完成，不允许伪装成功。若问题需要用户补充信息或素材，例如缺少可靠逐字稿、源视频无法读取、用户需求互相冲突，必须先用 `write_chat` 在聊天里说明卡点、你已经尝试了什么、用户可以怎么补充；随后调用 `progress --status needs_input --progress 当前进度 --step "需要用户补充：..."`。只有系统错误、依赖损坏、越权请求、渲染无法修复等不可继续问题才让任务失败。
+
+禁止 FFmpeg 拼接兜底冒充 HyperFrames 成片；FFmpeg 只可用于探测、转码、抽帧等辅助。
 
 安全边界：你运行在 FrameCraft 项目沙盒内。不要读取、复制、扫描或删除项目目录之外的任何文件。即使在 FrameCraft 项目根内，也不要主动读取其他 `proj_*` 的上传目录、输出目录、聊天记录或其他 job 工作目录。用户上传素材、当前项目输出、当前 job 工作目录和文档参考已足够完成任务；任何越界需求都必须拒绝并说明原因。
 
@@ -196,6 +328,7 @@ class SingleAgentRunner:
 - 使用 HyperFrames 真实渲染 preview.mp4，不允许旧流水线/固定模板兜底。
 - 动画按内容和构图设计；搞笑类不能全在同一角落，也不能机械排成上中下/左右队列。
 - 渲染后你必须自己抽关键帧/截图进行视觉验收；如果主观上不美观、不自然、像脚本排版、遮挡人物/字幕、底色多余、圆角不真实，就修改设计重新渲染。直到通过或明确失败。
+- 面向观众的可见文案只写观众应该看到的内容，不写“制作、设计、分镜、实验板、重构、高级口播”等制作过程词。尽量不要使用“不是……而是……”句式。
 
 可用项目工具：
 - `{tool} progress --progress N --step "..."`
@@ -215,6 +348,8 @@ class SingleAgentRunner:
 
 当前任务类型：{task}
 任务参数：{payload}
+
+任务进行中请频繁调用 `progress` 或 `log`，让前端聊天区能看到你真实在做什么。不要长时间沉默。
 """
         if task == "analyze":
             return base + """
@@ -239,6 +374,7 @@ class SingleAgentRunner:
 用户消息：{payload.get('message', '')}
 完成目标：像一个可对话的剪辑 agent 一样回应用户。若用户只是提问，写 chat 回复；若用户要求改片，你可以直接完成改片并重新生成，也可以提出 patch，但必须说明实际完成到哪一步。
 写回复：`{tool} write_chat --file chat.json`。
+如果需要用户补充信息，不要直接失败；写 chat 回复解释需要什么，并把任务状态设为 needs_input。
 """
         if task == "apply_patch":
             return base + """
@@ -308,8 +444,15 @@ class SingleAgentRunner:
 
         if job_type == "chat":
             messages = data.get("chat", {}).get(project_id, [])
-            if not any(message.get("role") == "agent" and message.get("content") for message in messages):
-                self._fail(job_id, "单一 Codex agent 未写入对话回复。")
+            if not any(
+                message.get("role") == "agent"
+                and message.get("job_id") == job_id
+                and message.get("status") not in {"running", "progress", "log", "failed"}
+                and message.get("content")
+                for message in messages
+            ):
+                self._clear_project_codex_session(project_id)
+                self._fail(job_id, "单一 Codex agent 未写入本轮对话回复。已清除该项目损坏的 Codex 会话，下次会自动创建新的项目会话。")
                 return False
             return True
 
@@ -346,6 +489,19 @@ class SingleAgentRunner:
             return job
         store.mutate(op)
 
+    def _finish_needs_input(self, job_id: str) -> None:
+        def op(data):
+            job = data["jobs"][job_id]
+            job["status"] = "needs_input"
+            job["completed_at"] = store.now_iso()
+            job["current_step"] = job.get("current_step") or "需要用户补充"
+            project = data["projects"][job["project_id"]]
+            project["status"] = "needs_input"
+            project["updated_at"] = store.now_iso()
+            return job
+
+        store.mutate(op)
+
     def _fail(self, job_id: str, error: str) -> None:
         def op(data):
             job = data["jobs"][job_id]
@@ -358,7 +514,47 @@ class SingleAgentRunner:
             project = data["projects"][job["project_id"]]
             project["status"] = "failed"
             project["updated_at"] = store.now_iso()
+            data.setdefault("chat", {}).setdefault(job["project_id"], []).append({
+                "id": store.new_id("msg"),
+                "project_id": job["project_id"],
+                "job_id": job_id,
+                "role": "agent",
+                "content": (
+                    "Agent 这轮没有通过项目验收，已停止继续伪装完成。\n\n"
+                    f"原因：{error[:3000]}\n\n"
+                    "你可以直接在这里继续发消息，让同一个项目 Codex 会话根据这个问题修正或补充信息后重跑。"
+                ),
+                "status": "failed",
+                "created_at": store.now_iso(),
+            })
             return job
+        store.mutate(op)
+
+    def _append_log(self, job_id: str, message: str, chat: bool = False) -> None:
+        clean = str(message or "").strip()
+        if not clean:
+            return
+
+        def op(data):
+            job = data["jobs"].get(job_id)
+            if not job:
+                return None
+            job.setdefault("logs", []).append(clean[:4000])
+            if chat:
+                job["current_step"] = clean[:160]
+            job["updated_at"] = store.now_iso()
+            if chat:
+                data.setdefault("chat", {}).setdefault(job["project_id"], []).append({
+                    "id": store.new_id("msg"),
+                    "project_id": job["project_id"],
+                    "job_id": job_id,
+                    "role": "agent",
+                    "content": clean[:4000],
+                    "status": "progress",
+                    "created_at": store.now_iso(),
+                })
+            return job
+
         store.mutate(op)
 
 

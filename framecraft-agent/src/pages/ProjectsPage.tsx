@@ -12,6 +12,7 @@ const STATUS_LABEL: Record<string, string> = {
   chatting: 'Agent 对话中',
   exporting_draft: '导出草稿',
   completed: '已完成',
+  needs_input: '等待补充',
   failed: '失败',
   cancelled: '已取消',
 };

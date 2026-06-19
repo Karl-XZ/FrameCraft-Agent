@@ -46,6 +46,14 @@
 - 写分析文件、写剪辑方案、创建版本目录、注册版本、写聊天回复。
 - 不做剪辑判断，不生成固定动画，不代替 agent 验收。
 
+`backend/app/draft_exporter.py` 负责：
+
+- 在 `register_version` 阶段读取当前版本的 `timeline.json`。
+- 使用 vendored `VectCutAPI/pyJianYingDraft` 生成真实剪映草稿目录。
+- 将主视频、字幕和可降级表达的信息图层写成可编辑轨道。
+- 生成 `jianying_draft.zip`、`jianying_draft_manifest.json` 和 `jianying_import_guide.md`。
+- 若项目设置 `generate_draft=true` 且草稿导出失败，注册版本失败，任务不得伪装为完成。
+
 ## 每次任务的 agent 边界
 
 “同一个 agent 从头到尾”指一次 API 任务内只存在一个 Codex supervisor：
@@ -80,7 +88,18 @@
 - Codex 退出码非 0，任务失败。
 - `analyze` 缺少 `analysis.json` 或 `edit_plan.json`，任务失败。
 - `generate/apply_patch` 缺少 `preview.mp4`、`timeline.json`、`agent_visual_review.json` 或 HyperFrames 工程痕迹，任务失败。
+- 项目开启 `generate_draft=true` 但缺少 `jianying_draft.zip`，任务失败。
 - `chat` 没有写入 agent 回复，任务失败。
+
+## 剪映草稿导出边界
+
+剪映草稿不是从最终 MP4 反向还原，也不是空链接。当前实现从同一份统一时间线同步生成：
+
+- 主讲视频轨：完整源视频，保留原音频。
+- 字幕轨：逐段字幕，可在剪映中继续编辑。
+- 信息图层：将 timeline blocks 转换为剪映可表达的文字卡片、淡入淡出和位移关键帧。
+
+HyperFrames 预览仍是最终视觉效果的真实来源。CSS、GSAP、Lottie、Canvas 等复杂浏览器动画无法保证 100% 转成剪映原生可编辑动画；项目必须如实说明这一边界，不能把降级草稿说成完整反编译。
 
 ## 生成视频的 agent 要求
 

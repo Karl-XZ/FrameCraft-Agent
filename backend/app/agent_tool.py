@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .draft_exporter import DraftExportError, export_jianying_draft
 from . import store
 
 
@@ -186,6 +187,13 @@ def cmd_register_version(args: argparse.Namespace) -> None:
     if not preview.is_file():
         _print({"ok": False, "error": f"preview 不存在：{preview}"}, 1)
     vid = version_dir.name
+    project_settings = (store.snapshot()["projects"].get(pid) or {})
+    draft_result = None
+    if project_settings.get("generate_draft", True):
+        try:
+            draft_result = export_jianying_draft(pid, version_dir)
+        except DraftExportError as exc:
+            _print({"ok": False, "error": str(exc)}, 1)
 
     def op(data):
         existing = [v for v in data["versions"].values() if v["project_id"] == pid]
@@ -195,7 +203,7 @@ def cmd_register_version(args: argparse.Namespace) -> None:
             "project_id": pid,
             "version_number": number,
             "preview_url": f"/api/projects/{pid}/versions/{vid}/preview",
-            "draft_url": None,
+            "draft_url": f"/api/projects/{pid}/versions/{vid}/draft" if draft_result else None,
             "timeline_url": f"/api/projects/{pid}/versions/{vid}/timeline",
             "subtitles_url": f"/api/projects/{pid}/versions/{vid}/subtitles",
             "cover_url": None,
@@ -203,6 +211,9 @@ def cmd_register_version(args: argparse.Namespace) -> None:
             "hyperframes_url": f"/api/projects/{pid}/versions/{vid}/hyperframes",
             "version_dir": str(version_dir),
             "preview_path": str(preview),
+            "draft_path": str(draft_result.zip_path) if draft_result else None,
+            "draft_dir": str(draft_result.draft_dir) if draft_result else None,
+            "import_guide_path": str(draft_result.guide_path) if draft_result else None,
             "created_at": store.now_iso(),
         }
         data["versions"][vid] = version

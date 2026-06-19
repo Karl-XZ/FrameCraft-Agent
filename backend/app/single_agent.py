@@ -208,6 +208,11 @@ class SingleAgentRunner:
 - `{tool} probe_media PATH`
 - `{tool} copy_file SRC DST`
 
+剪映草稿导出规则：
+- 若项目设置 `generate_draft=true`，`register_version` 会自动根据你写入版本目录的 `timeline.json` 同步生成 `jianying_draft.zip`。
+- 你仍必须先写清楚统一时间线、字幕和动画 blocks；草稿导出器只负责格式转换，不负责替你做设计判断。
+- 草稿包含可编辑主视频、字幕和可降级表达的信息图层。复杂 HyperFrames/CSS/GSAP 动画不保证 100% 剪映原生还原，不能在可见文案或回复里伪装成完整反编译。
+
 当前任务类型：{task}
 任务参数：{payload}
 """
@@ -294,6 +299,11 @@ class SingleAgentRunner:
             if missing_required:
                 self._fail(job_id, "单一 Codex agent 未产出可复现渲染材料：" + "；".join(missing_required))
                 return False
+            if project.get("generate_draft", True):
+                draft_path = Path(version.get("draft_path") or version_dir / "jianying_draft.zip")
+                if not version.get("draft_url") or not draft_path.is_file() or draft_path.stat().st_size < 1024:
+                    self._fail(job_id, f"项目要求生成剪映草稿，但草稿 zip 不存在或为空：{draft_path}")
+                    return False
             return True
 
         if job_type == "chat":

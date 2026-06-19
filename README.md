@@ -100,8 +100,11 @@ curl http://127.0.0.1:8022/api/health
 - `timeline.json`
 - `agent_visual_review.json`
 - HyperFrames 工程痕迹，如 `hyperframes_project.zip`、`hyperframes/`、`project.tsx` 或 `src/`
+- 若项目开启 `generate_draft=true`，还必须存在真实 `jianying_draft.zip`，版本 `draft_url` 必须指向 `/api/projects/<project_id>/versions/<version_id>/draft`
 
 缺少任意关键产物，后端会把 job 标为 `failed`，并返回失败原因。
+
+剪映草稿由 `backend/app/draft_exporter.py` 从统一时间线同步生成。它包含可编辑主视频、字幕和信息图层；复杂 HyperFrames 浏览器动画不会被伪装成完整剪映原生反编译。
 
 ## Agent 工具
 

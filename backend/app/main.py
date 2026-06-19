@@ -335,10 +335,26 @@ def version_hyperframes(project_id: str, version_id: str):
     raise HTTPException(404, "HyperFrames zip not found")
 
 
+@app.get("/api/projects/{project_id}/versions/{version_id}/draft")
+def version_draft(project_id: str, version_id: str):
+    version = _version(project_id, version_id)
+    path = Path(version.get("draft_path") or Path(version["version_dir"]) / "jianying_draft.zip")
+    if path.is_file():
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename=f"{version_id}_jianying_draft.zip",
+        )
+    raise HTTPException(404, "Jianying draft zip not found")
+
+
 @app.get("/api/projects/{project_id}/versions/{version_id}/import-guide")
 def import_guide(project_id: str, version_id: str):
-    _version(project_id, version_id)
-    return {"content": "当前新后端由单一 Codex agent 负责产出；若生成了剪映草稿或 HyperFrames 包，路径会在版本目录内。"}
+    version = _version(project_id, version_id)
+    guide_path = Path(version.get("import_guide_path") or Path(version["version_dir"]) / "jianying_import_guide.md")
+    if guide_path.is_file():
+        return {"content": guide_path.read_text(encoding="utf-8")}
+    return {"content": "该版本没有生成剪映草稿导入说明。若项目开启了草稿导出，这应视为生成失败而不是成功兜底。"}
 
 
 @app.post("/api/projects/{project_id}/chat")

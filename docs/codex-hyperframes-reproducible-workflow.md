@@ -70,6 +70,7 @@ Agent 必须生成 HyperFrames 工程并用 HyperFrames 真实渲染 `preview.mp
 5. Agent 必须亲自观看截图并写入 `agent_visual_review.json`。
 6. 若视觉复审不通过，Agent 重写设计、重建 HyperFrames，并重新渲染复审。
 7. 视觉复审通过后，通过 `register_version` 注册版本、字幕、封面和发布文案。
+8. 如果项目开启草稿导出，`register_version` 会基于同一份 `timeline.json` 自动生成真实 `jianying_draft.zip`；草稿失败则本次任务失败。
 
 禁止使用 FFmpeg 拼接作为兜底成片；FFmpeg 仅可用于素材转码、音频提取和 QA 抽帧。
 
@@ -88,5 +89,22 @@ Agent 必须生成 HyperFrames 工程并用 HyperFrames 真实渲染 `preview.mp
 - 非全屏版信息区密度足够，且没有遮挡人物。
 - `agent_visual_review.json` 存在且 `pass=true`；如果视觉复审主观认为不美观、不自然、不高级，即使无硬性遮挡也必须重做。
 - `render_log.json` 中 `lint_ok=true`、`render_ok=true`。
+- 若项目开启 `generate_draft=true`，版本目录中必须存在 `jianying_draft.zip` 和 `jianying_draft_manifest.json`，前端 `draft_url` 必须指向真实下载路由。
 
 推荐抽取整片序列帧或 contact sheet，逐块检查动画入场、持续态和退场。若某块看不清、遮挡、太小或同质化，必须修改设计规格后重新渲染。
+
+## 8. 剪映草稿同步
+
+草稿导出由后端格式转换器完成，不由固定视频流水线生成视觉设计。Codex agent 仍然必须负责 timeline、字幕和 blocks 的内容设计；导出器只把这些结构写入剪映可以编辑的轨道。
+
+当前可编辑草稿包含：
+
+- 主视频轨：完整源视频，保留原音频。
+- 字幕轨：简体中文字幕，位置固定在下方安全区、水平居中。
+- 信息图层：标题、列表、流程、反应卡等 blocks 的可编辑文本版本，带基础淡入淡出和位移关键帧。
+
+真实边界：
+
+- HyperFrames 预览视频仍是最终视觉验收对象。
+- 剪映草稿是可继续二次编辑的同步工程，不承诺完整还原浏览器里的复杂 CSS/GSAP/Lottie/Canvas 动画。
+- 如果草稿导出失败，不能返回空 `draft_url` 或假链接，任务必须失败并显示错误。

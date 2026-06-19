@@ -1,3 +1,5 @@
 @echo off
 cd /d "%~dp0..\framecraft-agent"
-npm run dev
+if "%FRAMECRAFT_FRONTEND_HOST%"=="" set FRAMECRAFT_FRONTEND_HOST=0.0.0.0
+if "%FRAMECRAFT_FRONTEND_PORT%"=="" set FRAMECRAFT_FRONTEND_PORT=5174
+npm run dev -- --host %FRAMECRAFT_FRONTEND_HOST% --port %FRAMECRAFT_FRONTEND_PORT%

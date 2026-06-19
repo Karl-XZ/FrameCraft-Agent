@@ -33,23 +33,6 @@ foreach ($cmd in @("ffmpeg", "python", "git")) {
     }
 }
 
-Write-Host "`n=== Jianying ===" -ForegroundColor Cyan
-if (Test-Path $pathsFile) {
-    $paths = Get-Content $pathsFile -Raw | ConvertFrom-Json
-    foreach ($key in @("app_exe", "draft_dir", "data_dir")) {
-        $p = $paths.jianying.$key
-        if ($p -and (Test-Path $p)) {
-            Write-Host "OK  jianying.$key" -ForegroundColor Green
-            Write-Host "    $p" -ForegroundColor Gray
-        } elseif ($p) {
-            Write-Host "WARN jianying.$key path missing: $p" -ForegroundColor Yellow
-        }
-    }
-    if ($paths.jianying.app_version) {
-        Write-Host "INFO version $($paths.jianying.app_version)" -ForegroundColor Gray
-    }
-}
-
 Write-Host "`n=== HyperFrames ===" -ForegroundColor Cyan
 $hfBin = Join-Path $root "node_modules\hyperframes\dist\cli.js"
 if (Test-Path $hfBin) {
@@ -67,31 +50,21 @@ if (Test-Path $chromePath) {
     Write-Host "WARN Chromium not pre-downloaded (first render will download)" -ForegroundColor Yellow
 }
 
-Write-Host "`n=== VectCutAPI ===" -ForegroundColor Cyan
-$venvPy = Join-Path $root "vendor\VectCutAPI\venv-capcut\Scripts\python.exe"
-if (Test-Path $venvPy) {
-    Write-Host "OK  VectCutAPI venv" -ForegroundColor Green
-    & $venvPy -c "import flask, requests; print('OK  flask + requests')" 2>&1
+Write-Host "`n=== Backend ===" -ForegroundColor Cyan
+$backendPy = Join-Path $root "backend\venv\Scripts\python.exe"
+if (Test-Path $backendPy) {
+    $env:PYTHONPATH = "backend"
+    & $backendPy -c "import app.main; print('OK  single-agent backend')" 2>&1
 } else {
-    Write-Host "MISS VectCutAPI venv" -ForegroundColor Red
+    Write-Host "MISS backend venv" -ForegroundColor Red
 }
 
-Write-Host "`n=== OpenClaw ===" -ForegroundColor Cyan
-$env:Path = (Split-Path $nodeExe) + ";C:\Users\ZHOU\AppData\Roaming\npm;" + $env:Path
-$openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
-if ($openclaw) {
-    $ocVer = & openclaw --version 2>&1
-    Write-Host "OK  openclaw $ocVer" -ForegroundColor Green
+Write-Host "`n=== Codex ===" -ForegroundColor Cyan
+$codex = Get-Command codex -ErrorAction SilentlyContinue
+if ($codex) {
+    & codex --version
 } else {
-    Write-Host "MISS openclaw (npm i -g openclaw@latest, Node>=22.19)" -ForegroundColor Yellow
-}
-
-Write-Host "`n=== ASR (faster-whisper) ===" -ForegroundColor Cyan
-$asrPy = Join-Path $root "vendor\asr-venv\Scripts\python.exe"
-if (Test-Path $asrPy) {
-    & $asrPy -c "from faster_whisper import WhisperModel; print('OK  faster-whisper')" 2>&1
-} else {
-    Write-Host "MISS asr-venv" -ForegroundColor Yellow
+    Write-Host "MISS codex" -ForegroundColor Yellow
 }
 
 Write-Host "`n=== Done ===" -ForegroundColor Cyan

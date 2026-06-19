@@ -32,7 +32,7 @@ export default function LandingHero() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {['OpenClaw', 'HyperFrames', '剪映草稿'].map((badge) => (
+          {['Codex', 'HyperFrames', '剪映草稿'].map((badge) => (
             <span key={badge} className="px-3 py-1 rounded-full text-xs font-medium bg-white/5 border border-white/10 text-text-secondary">
               {badge}
             </span>

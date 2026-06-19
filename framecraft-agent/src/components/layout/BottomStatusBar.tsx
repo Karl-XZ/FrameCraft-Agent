@@ -1,9 +1,20 @@
 import React from 'react';
 import { FileVideo, Zap } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
+import { api } from '../../api/client';
 
 export default function BottomStatusBar() {
-  const { taskText, overallProgress, version, generateHyperFramesProgress, generateDraftProgress, step } = useProjectStore();
+  const {
+    taskText,
+    overallProgress,
+    version,
+    generateHyperFramesProgress,
+    generateDraftProgress,
+    step,
+    versions,
+    currentVersionId,
+  } = useProjectStore();
+  const currentVersion = versions.find((v) => v.id === currentVersionId) || versions[0];
 
   const progress = step === 'generate'
     ? Math.round((generateHyperFramesProgress + generateDraftProgress) / 2)
@@ -33,14 +44,32 @@ export default function BottomStatusBar() {
         <span className="text-xs text-text-muted font-mono">{version}</span>
 
         <div className="flex items-center gap-1.5">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/8 text-xs text-text-secondary hover:text-text-main transition-all">
+          <a
+            href={currentVersion?.preview_url ? api.fileUrl(currentVersion.preview_url) : undefined}
+            download
+            aria-disabled={!currentVersion?.preview_url}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-white/8 text-xs transition-all ${
+              currentVersion?.preview_url
+                ? 'bg-white/5 hover:bg-white/10 text-text-secondary hover:text-text-main'
+                : 'bg-white/[0.02] text-text-muted/50 pointer-events-none'
+            }`}
+          >
             <FileVideo className="w-3.5 h-3.5" />
             视频文件
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 hover:bg-white/10 border border-white/8 text-xs text-text-secondary hover:text-text-main transition-all">
+          </a>
+          <a
+            href={currentVersion?.draft_url ? api.fileUrl(currentVersion.draft_url) : undefined}
+            download
+            aria-disabled={!currentVersion?.draft_url}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-white/8 text-xs transition-all ${
+              currentVersion?.draft_url
+                ? 'bg-white/5 hover:bg-white/10 text-text-secondary hover:text-text-main'
+                : 'bg-white/[0.02] text-text-muted/50 pointer-events-none'
+            }`}
+          >
             <Zap className="w-3.5 h-3.5" />
             草稿文件
-          </button>
+          </a>
         </div>
       </div>
     </div>

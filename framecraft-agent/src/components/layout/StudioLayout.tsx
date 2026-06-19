@@ -29,7 +29,7 @@ export default function StudioLayout() {
     setSelectedAssetId, setShowAssetDrawer,
     generateHyperFramesProgress, generateDraftProgress,
     versions, currentVersionId, setCurrentVersionId, setPreviewUrl, setVersion, error,
-    projectId,
+    projectId, activeJobId,
   } = useProjectStore();
   const { startAnalyze } = useStudioWorkflow();
   const [importGuideOpen, setImportGuideOpen] = useState(false);
@@ -60,9 +60,9 @@ export default function StudioLayout() {
           <div className="flex flex-col items-center gap-6 h-full justify-center">
             <StudioEmptyState />
             {assets.length > 0 && (
-              <GradientButton size="lg" className="rounded-xl px-8" onClick={() => void startAnalyze()}>
+              <GradientButton size="lg" className="rounded-xl px-8" onClick={() => void startAnalyze()} disabled={Boolean(activeJobId)}>
                 <Play className="w-4 h-4" />
-                开始 AI 分析
+                {activeJobId ? 'Agent 任务运行中' : '开始 AI 分析'}
               </GradientButton>
             )}
           </div>

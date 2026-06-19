@@ -1,0 +1,30 @@
+[
+  {
+    "id": "uWntQUwxnHQ",
+    "label": "搞笑脱口秀",
+    "category": "funny_reaction",
+    "source_url": "https://www.youtube.com/shorts/uWntQUwxnHQ",
+    "note": "单口脱口秀，重点保留表情与麦克风动作，不要遮挡脸部。"
+  },
+  {
+    "id": "fVEdGqSNsCE",
+    "label": "时评口播",
+    "category": "opinion_commentary",
+    "source_url": "https://www.youtube.com/shorts/fVEdGqSNsCE",
+    "note": "观点评论类口播，字幕必须逐字，不得出现制作侧文案。"
+  },
+  {
+    "id": "ax6PbVOZZIU",
+    "label": "产品技巧演示",
+    "category": "product_demo",
+    "source_url": "https://www.youtube.com/shorts/ax6PbVOZZIU",
+    "note": "产品功能演示，信息层需要更清楚的解释与指引。"
+  },
+  {
+    "id": "8ZlH1Y2f85U",
+    "label": "医学科普口播",
+    "category": "knowledge_explainer",
+    "source_url": "https://www.youtube.com/shorts/8ZlH1Y2f85U",
+    "note": "医学科普类，允许信息表和解释卡，但不得压到人物脸部。"
+  }
+]

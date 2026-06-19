@@ -1,11 +1,25 @@
 import { useCallback, useRef } from 'react';
 import {
   api,
+  type BackendChatMessage,
+  type BackendJob,
   formatDuration,
   formatSize,
   mapAssetType,
 } from '../api/client';
 import { useProjectStore, type Asset } from '../store/projectStore';
+
+const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled'];
+
+function mapChatMessage(m: BackendChatMessage) {
+  return {
+    id: m.id,
+    role: m.role as 'user' | 'agent',
+    text: m.content,
+    timestamp: Date.parse(m.created_at) || Date.now(),
+    patch: m.patch,
+  };
+}
 
 export function useStudioWorkflow() {
   const store = useProjectStore();
@@ -83,18 +97,30 @@ export function useStudioWorkflow() {
     }
     try {
       const history = await api.getChat(projectId);
-      store.setChatMessages(
-        history.map((m) => ({
-          id: m.id,
-          role: m.role as 'user' | 'agent',
-          text: m.content,
-          timestamp: Date.parse(m.created_at) || Date.now(),
-        }))
-      );
+      store.setChatMessages(history.map(mapChatMessage));
     } catch {
       /* ignore */
     }
   }, [refreshAssets, store]);
+
+  const refreshVersions = useCallback(async (projectId: string, doneText?: string) => {
+    const project = await api.getProject(projectId);
+    const versions = await api.listVersions(projectId);
+    store.setVersions(versions);
+    const current = versions.find((v) => v.id === project.current_version_id) || versions[0];
+    if (current) {
+      store.setCurrentVersionId(current.id);
+      store.setVersion(`v${current.version_number}.0`);
+      if (current.preview_url) store.setPreviewUrl(api.fileUrl(current.preview_url));
+      store.setStep('result');
+    }
+    if (doneText) store.setTaskText(doneText);
+  }, [store]);
+
+  const refreshChat = useCallback(async (projectId: string) => {
+    const history = await api.getChat(projectId);
+    store.setChatMessages(history.map(mapChatMessage));
+  }, [store]);
 
   const uploadFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -119,8 +145,9 @@ export function useStudioWorkflow() {
   );
 
   const watchJob = useCallback(
-    (jobId: string, onDone?: () => void) => {
+    (jobId: string, onDone?: (job: BackendJob) => void | Promise<void>, onTerminal?: (job: BackendJob) => void | Promise<void>) => {
       jobEsRef.current?.close();
+      store.setActiveJobId(jobId);
       jobEsRef.current = api.watchJob(jobId, (job) => {
         store.setTaskText(job.current_step || '处理中');
         if (job.type === 'analyze' || store.step === 'analyze') {
@@ -141,12 +168,56 @@ export function useStudioWorkflow() {
           store.setError(job.error_message || '任务失败');
         }
         if (job.status === 'completed') {
-          onDone?.();
+          void Promise.resolve(onDone?.(job)).catch((e) => {
+            store.setError(e instanceof Error ? e.message : '任务完成后的刷新失败');
+          });
+        }
+        if (TERMINAL_JOB_STATUSES.includes(job.status)) {
+          store.setActiveJobId(null);
+          void Promise.resolve(onTerminal?.(job)).catch(() => undefined);
         }
       });
     },
     [store]
   );
+
+  const loadProjectWithActiveJob = useCallback(async (projectId: string) => {
+    await loadProject(projectId);
+    const active = await api.getActiveJob(projectId).catch(() => null);
+    if (!active || TERMINAL_JOB_STATUSES.includes(active.status)) return;
+
+    if (active.type === 'analyze') {
+      store.setStep('analyze');
+      store.setOverallProgress(Math.round(active.progress));
+    } else if (active.type === 'generate' || active.type === 'apply_patch') {
+      store.setStep('generate');
+      store.setGenerateHyperFramesProgress(Math.round(active.progress));
+      store.setGenerateDraftProgress(Math.max(0, Math.round(active.progress) - 10));
+    } else if (active.type === 'chat') {
+      store.setChatBusy(true);
+    }
+
+    watchJob(
+      active.id,
+      async (job) => {
+        if (job.type === 'analyze') {
+          const plan = await api.getEditPlan(projectId);
+          store.setEditPlan(plan);
+          store.setStep('plan');
+          store.setTaskText('分析完成，请确认剪辑方案');
+          await refreshAssets(projectId);
+        } else if (job.type === 'chat') {
+          await refreshChat(projectId);
+          await refreshVersions(projectId, '对话处理完成');
+        } else {
+          await refreshVersions(projectId, '生成完成');
+        }
+      },
+      async (job) => {
+        if (job.type === 'chat') store.setChatBusy(false);
+      },
+    );
+  }, [loadProject, refreshAssets, refreshChat, refreshVersions, store, watchJob]);
 
   const startAnalyze = useCallback(async () => {
     const projectId = await ensureProject();
@@ -189,43 +260,36 @@ export function useStudioWorkflow() {
         : '1080p';
     const job = await api.generate(projectId, { resolution, fps: store.frameRate });
     watchJob(job.id, async () => {
-      const versions = await api.listVersions(projectId);
-      store.setVersions(versions);
-      const latest = versions[0];
-      if (latest) {
-        store.setCurrentVersionId(latest.id);
-        store.setVersion(`v${latest.version_number}.0`);
-        if (latest.preview_url) store.setPreviewUrl(api.fileUrl(latest.preview_url));
-      }
-      store.setStep('result');
-      store.setTaskText('生成完成');
+      await refreshVersions(projectId, '生成完成');
     });
-  }, [store, watchJob]);
+  }, [refreshVersions, store, watchJob]);
 
   const afterRegenerate = useCallback(
     (projectId: string, doneText: string) => async () => {
-      const versions = await api.listVersions(projectId);
-      store.setVersions(versions);
-      const latest = versions[0];
-      if (latest) {
-        store.setCurrentVersionId(latest.id);
-        store.setVersion(`v${latest.version_number}.0`);
-        if (latest.preview_url) store.setPreviewUrl(api.fileUrl(latest.preview_url));
-      }
-      store.setStep('result');
-      store.setTaskText(doneText);
+      await refreshVersions(projectId, doneText);
     },
-    [store]
+    [refreshVersions]
   );
 
-  // 发送修改：先生成方案，等待用户接受/撤销（需求 §11.3.6）
+  // 发送消息给当前项目自己的 Codex agent：可问答，也可直接改片并生成新版本。
   const sendChat = useCallback(
     async (message: string) => {
       const projectId = store.projectId;
       if (!projectId || !message.trim()) return;
+      if (store.activeJobId) {
+        store.addChatMessage({
+          id: crypto.randomUUID(),
+          role: 'agent',
+          text: '当前项目已有 agent 任务在运行，请等它完成后再发送新的修改。',
+          timestamp: Date.now(),
+        });
+        return;
+      }
       store.addChatMessage({ id: crypto.randomUUID(), role: 'user', text: message, timestamp: Date.now() });
+      store.setChatBusy(true);
+      store.setTaskText('Codex Agent 正在处理对话');
       try {
-        const res = await api.chat(projectId, message, false);
+        const res = await api.chat(projectId, message, true);
         store.addChatMessage({
           id: res.id,
           role: 'agent',
@@ -238,17 +302,41 @@ export function useStudioWorkflow() {
         } else {
           store.setPendingPatch(null);
         }
+        if (res.job_id) {
+          watchJob(
+            res.job_id,
+            async () => {
+              await refreshChat(projectId);
+              await refreshVersions(projectId, '对话处理完成');
+            },
+            async (job) => {
+              store.setChatBusy(false);
+              if (job.status === 'failed') {
+                await refreshChat(projectId).catch(() => undefined);
+                store.addChatMessage({
+                  id: crypto.randomUUID(),
+                  role: 'agent',
+                  text: `对话任务失败：${job.error_message || '未知错误'}`,
+                  timestamp: Date.now(),
+                });
+              }
+            },
+          );
+        } else {
+          store.setChatBusy(false);
+        }
       } catch (e) {
+        store.setChatBusy(false);
         const msg = e instanceof Error ? e.message : '未知错误';
         store.addChatMessage({
           id: crypto.randomUUID(),
           role: 'agent',
-          text: `对话请求失败：${msg}\n\n请确认后端 http://127.0.0.1:8000 已启动，并在「平台设置 → 模型配置」中保存 API Key。`,
+          text: `对话请求失败：${msg}\n\n请确认新版后端已启动，并且本机 Codex CLI 已登录可用。`,
           timestamp: Date.now(),
         });
       }
     },
-    [store]
+    [refreshChat, refreshVersions, store, watchJob]
   );
 
   // 接受修改方案：应用 patch 并重新生成
@@ -288,7 +376,7 @@ export function useStudioWorkflow() {
 
   return {
     ensureProject,
-    loadProject,
+    loadProject: loadProjectWithActiveJob,
     uploadFiles,
     startAnalyze,
     startGenerate,

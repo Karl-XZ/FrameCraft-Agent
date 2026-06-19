@@ -16,7 +16,7 @@ export default function DemoPreviewCard() {
 
       <div className="relative rounded-lg overflow-hidden bg-black/50 aspect-video flex items-center justify-center border border-dashed border-white/10">
         <p className="text-xs text-text-muted px-4 text-center">
-          上传素材并由 OpenClaw Agent 分析后，此处显示 HyperFrames 预览成片
+          上传素材并由 Codex Agent 分析后，此处显示 HyperFrames 预览成片
         </p>
       </div>
 

@@ -6,7 +6,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useStudioWorkflow } from '../../hooks/useStudioWorkflow';
 
 export default function EditPlanCard() {
-  const { editPlan, jobWarnings } = useProjectStore();
+  const { editPlan, jobWarnings, activeJobId } = useProjectStore();
   const { startGenerate } = useStudioWorkflow();
 
   const planWarnings = [
@@ -100,9 +100,9 @@ export default function EditPlanCard() {
       </GlassCard>
 
       <div className="flex gap-3">
-        <GradientButton size="lg" className="flex-1 rounded-xl" onClick={() => void startGenerate()}>
+        <GradientButton size="lg" className="flex-1 rounded-xl" onClick={() => void startGenerate()} disabled={Boolean(activeJobId)}>
           <Sparkles className="w-4 h-4" />
-          确认生成
+          {activeJobId ? 'Agent 任务运行中' : '确认生成'}
         </GradientButton>
       </div>
     </div>

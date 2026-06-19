@@ -1,4 +1,4 @@
-# FrameCraft Agent — 一键安装 Python/ASR/OpenClaw 网关等运行时依赖
+# FrameCraft Agent — 单 Codex agent 新后端依赖安装
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/setup-deps.ps1
 
 $ErrorActionPreference = "Stop"
@@ -34,31 +34,32 @@ $backendPy = Join-Path $root "backend\venv\Scripts\python.exe"
 if (-not (Test-Path $backendPy)) {
     python -m venv backend\venv
 }
+& $backendPy -m pip install -q --upgrade pip
 & $backendPy -m pip install -q -r backend\requirements.txt
-& $backendPy -m pip install -q -r vendor\VectCutAPI\requirements.txt
-& $backendPy -c "import oss2, flask; print('OK  VectCutAPI deps (oss2, flask)')"
+$env:PYTHONPATH = "backend"
+& $backendPy -c "import app.main; print('OK  single-agent backend deps')"
 Write-Host "OK  backend venv" -ForegroundColor Green
 
-Write-Step "ASR (faster-whisper)"
-$asrPy = Join-Path $root "vendor\asr-venv\Scripts\python.exe"
-if (-not (Test-Path $asrPy)) {
-    python -m venv vendor\asr-venv
-}
-& $asrPy -m pip install -q -r vendor\asr-requirements.txt
-& $asrPy -c "from faster_whisper import WhisperModel; print('OK  faster-whisper')"
-
-Write-Step "OpenClaw gateway auth (mode=none)"
+Write-Step "Node / HyperFrames deps"
 $nodeExe = Resolve-NodeExe
 if ($nodeExe) {
     $env:Path = "$(Split-Path $nodeExe);$env:APPDATA\npm;$env:Path"
 }
-$openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
-if ($openclaw) {
-    $patch = Join-Path $root "config\openclaw.gateway.patch.json"
-    & openclaw config patch --file $patch 2>&1 | Out-Null
-    Write-Host "OK  openclaw gateway.auth.mode=none" -ForegroundColor Green
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    npm install
+    Push-Location framecraft-agent
+    npm install
+    Pop-Location
 } else {
-    Write-Host "WARN openclaw not found; skip gateway patch (npm i -g openclaw@latest)" -ForegroundColor Yellow
+    throw "npm is required on Windows for this setup script."
+}
+
+Write-Step "Codex CLI"
+$codex = Get-Command codex -ErrorAction SilentlyContinue
+if ($codex) {
+    & codex --version
+} else {
+    Write-Host "WARN Codex CLI not found. Install Codex or set CODEX_BIN." -ForegroundColor Yellow
 }
 
 Write-Step "Done"

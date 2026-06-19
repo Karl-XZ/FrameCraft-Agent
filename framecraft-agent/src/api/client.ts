@@ -14,6 +14,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface BackendProject {
   id: string;
+  agent_session_id?: string;
   name: string;
   status: string;
   aspect_ratio: string;
@@ -56,6 +57,22 @@ export interface BackendJob {
   plan_progress?: number;
   logs?: string[];
   warnings?: Array<{ code?: string; message: string; asset_id?: string }>;
+}
+
+export interface BackendChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  patch?: Record<string, unknown>;
+  status?: string;
+}
+
+export interface ModelProviderMeta {
+  id: string;
+  label: string;
+  base_url?: string;
+  note?: string;
 }
 
 export interface AssetAnalysis {
@@ -171,6 +188,7 @@ export const api = {
     request<{ content: string }>(`/api/projects/${projectId}/versions/${versionId}/import-guide`),
   getModelProviders: () => request<Record<string, unknown>>('/api/model-providers'),
   getJob: (jobId: string) => request<BackendJob>(`/api/jobs/${jobId}`),
+  getActiveJob: (projectId: string) => request<BackendJob | null>(`/api/projects/${projectId}/jobs/active`),
   watchJob: (jobId: string, onEvent: (job: BackendJob) => void) => {
     const es = new EventSource(`${API_BASE}/api/jobs/${jobId}/events`);
     es.onmessage = (ev) => {
@@ -192,7 +210,7 @@ export const api = {
       { method: 'POST' }
     ),
   getChat: (projectId: string) =>
-    request<Array<{ id: string; role: string; content: string; created_at: string }>>(`/api/projects/${projectId}/chat`),
+    request<BackendChatMessage[]>(`/api/projects/${projectId}/chat`),
   getSettings: () => request<Record<string, string>>('/api/settings/model'),
   saveSettings: (body: Record<string, string>) =>
     request('/api/settings/model', {

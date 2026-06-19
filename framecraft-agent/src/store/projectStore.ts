@@ -63,6 +63,8 @@ interface ProjectState {
   pendingPatch: Record<string, unknown> | null;
   previewUrl: string | null;
   error: string | null;
+  chatBusy: boolean;
+  activeJobId: string | null;
 
   setProjectId: (id: string | null) => void;
   setStep: (step: Step) => void;
@@ -104,6 +106,8 @@ interface ProjectState {
   setPreviewUrl: (url: string | null) => void;
   setPendingPatch: (p: Record<string, unknown> | null) => void;
   setError: (e: string | null) => void;
+  setChatBusy: (v: boolean) => void;
+  setActiveJobId: (id: string | null) => void;
   clearProject: () => void;
 }
 
@@ -145,6 +149,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   pendingPatch: null,
   previewUrl: null,
   error: null,
+  chatBusy: false,
+  activeJobId: null,
 
   setProjectId: (id) => set({ projectId: id }),
   setStep: (step) => set({ step }),
@@ -186,6 +192,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setPreviewUrl: (url) => set({ previewUrl: url }),
   setPendingPatch: (p) => set({ pendingPatch: p }),
   setError: (e) => set({ error: e }),
+  setChatBusy: (v) => set({ chatBusy: v }),
+  setActiveJobId: (id) => set({ activeJobId: id }),
   clearProject: () =>
     set({
       projectId: null,
@@ -201,6 +209,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
       previewUrl: null,
       pendingPatch: null,
       error: null,
+      chatBusy: false,
+      activeJobId: null,
       overallProgress: 0,
       analyzeCompletedSteps: [],
       analyzeLogs: [],

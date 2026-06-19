@@ -1,0 +1,38 @@
+[
+  {
+    "id": "paUwYVvK6DY",
+    "label": "搞笑电话吐槽",
+    "category": "funny_reaction",
+    "source_url": "https://www.youtube.com/watch?v=paUwYVvK6DY",
+    "clip_start": 34.0,
+    "clip_end": 56.0,
+    "note": "搞笑吐槽类口播，优先保留人物表情和脸部细节，允许表情动画但不得压脸。"
+  },
+  {
+    "id": "7ZVqBwcXydU",
+    "label": "观点评论口播",
+    "category": "opinion_commentary",
+    "source_url": "https://www.youtube.com/watch?v=7ZVqBwcXydU",
+    "clip_start": 85.0,
+    "clip_end": 140.0,
+    "note": "观点评论类口播，主讲始终居中偏左，所有叠加文案必须面向观众。"
+  },
+  {
+    "id": "ct8S9bmjOtU",
+    "label": "知识讲解口播",
+    "category": "knowledge_explainer",
+    "source_url": "https://www.youtube.com/watch?v=ct8S9bmjOtU",
+    "clip_start": 120.0,
+    "clip_end": 175.0,
+    "note": "知识讲解类口播，可使用信息表和解释卡，若引用外部数据需在左下角标明来源。"
+  },
+  {
+    "id": "rk-OwXrNxoU",
+    "label": "产品体验口播",
+    "category": "product_demo",
+    "source_url": "https://www.youtube.com/watch?v=rk-OwXrNxoU",
+    "clip_start": 100.0,
+    "clip_end": 150.0,
+    "note": "产品体验类口播，允许产品近景穿插，但仍要保证人物表达完整且不遮挡脸部。"
+  }
+]

@@ -103,11 +103,15 @@ def snapshot() -> dict[str, Any]:
 
 
 def public_project(project: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(project)
+    out = deepcopy(project)
+    out.pop("agent_session_id", None)
+    return out
 
 
 def public_asset(asset: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(asset)
+    out = deepcopy(asset)
+    out.pop("path", None)
+    return out
 
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -117,11 +121,22 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     out.setdefault("warnings", [])
     out.setdefault("plan_substep", None)
     out.setdefault("plan_progress", out.get("progress", 0))
+    out.pop("payload", None)
     return out
 
 
 def public_version(version: dict[str, Any]) -> dict[str, Any]:
-    return deepcopy(version)
+    out = deepcopy(version)
+    for key in ("version_dir", "preview_path", "draft_path", "draft_dir", "import_guide_path"):
+        out.pop(key, None)
+    return out
+
+
+def public_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    out = deepcopy(settings)
+    out["api_key"] = ""
+    out["api_key_configured"] = bool(settings.get("api_key"))
+    return out
 
 
 def project_dir(project_id: str) -> Path:

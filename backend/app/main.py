@@ -3,25 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import os
 import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import store
+from .security import cors_origin_regex, cors_origins, get_access_token, require_access_token, token_help
 from .single_agent import ProjectBusyError, runner
 
 app = FastAPI(title="FrameCraft Single Codex Agent API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
+    allow_origin_regex=cors_origin_regex(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.middleware("http")(require_access_token)
+
+
+@app.on_event("startup")
+def startup_security_notice():
+    if os.getenv("FRAMECRAFT_DISABLE_AUTH", "").strip() in {"1", "true", "yes"}:
+        print("[FrameCraft] WARNING auth disabled by FRAMECRAFT_DISABLE_AUTH", flush=True)
+    else:
+        get_access_token()
+        print(f"[FrameCraft] Access token source: {token_help()}", flush=True)
 
 
 class ProjectIn(BaseModel):
@@ -203,7 +216,7 @@ def get_asset_analysis(asset_id: str):
         "vision_error": None,
         "ocr_status": "agent-managed",
         "ocr_error": None,
-        "meta": {"path": asset.get("path")},
+        "meta": {},
         "frame_urls": [],
         "broll_segments": [],
     }
@@ -271,7 +284,7 @@ def cancel_job(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/events")
-async def job_events(job_id: str):
+async def job_events(job_id: str, request: Request):
     async def stream():
         while True:
             data = store.snapshot()
@@ -408,14 +421,20 @@ def model_providers():
 
 @app.get("/api/settings/model")
 def get_settings():
-    return store.snapshot()["settings"]
+    return store.public_settings(store.snapshot()["settings"])
 
 
 @app.patch("/api/settings/model")
 def save_settings(body: dict[str, str]):
     def op(data):
-        data["settings"].update(body)
-        return data["settings"]
+        allowed = {"provider", "text_model", "vision_model", "base_url", "asr_model"}
+        for key in allowed:
+            if key in body:
+                data["settings"][key] = body[key]
+        # The current Codex backend does not need browser-submitted API keys.
+        # Do not persist or echo them from the public web UI.
+        data["settings"]["api_key"] = ""
+        return store.public_settings(data["settings"])
     return store.mutate(op)
 
 

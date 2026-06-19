@@ -1,7 +1,62 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const TOKEN_STORAGE_KEY = 'framecraft_access_token';
+
+function readAccessToken() {
+  if (typeof window === 'undefined') return '';
+  const url = new URL(window.location.href);
+  const fromUrl = url.searchParams.get('access_token') || url.searchParams.get('framecraft_token');
+  if (fromUrl) {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, fromUrl);
+    url.searchParams.delete('access_token');
+    url.searchParams.delete('framecraft_token');
+    window.history.replaceState(null, '', url.toString());
+    return fromUrl;
+  }
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+}
+
+function requestAccessToken() {
+  const existing = readAccessToken();
+  if (existing || typeof window === 'undefined') return existing;
+  const token = window.prompt('请输入 FrameCraft 访问口令');
+  if (token?.trim()) {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
+    return token.trim();
+  }
+  return '';
+}
+
+function authHeaders(headers?: HeadersInit) {
+  const merged = new Headers(headers);
+  const token = readAccessToken();
+  if (token) merged.set('X-FrameCraft-Token', token);
+  return merged;
+}
+
+async function authFetch(input: string, options?: RequestInit, retry = true): Promise<Response> {
+  const res = await fetch(input, {
+    ...options,
+    headers: authHeaders(options?.headers),
+  });
+  if (res.status === 401 && retry) {
+    const token = requestAccessToken();
+    if (token) return authFetch(input, options, false);
+  }
+  return res;
+}
+
+function urlWithAccessToken(path: string) {
+  const base = `${API_BASE}${path}`;
+  const token = readAccessToken();
+  if (!token) return base;
+  const url = new URL(base, window.location.origin);
+  url.searchParams.set('access_token', token);
+  if (API_BASE) return url.toString();
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const res = await authFetch(`${API_BASE}${path}`, options);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
@@ -153,7 +208,7 @@ export const api = {
     fd.append('file', file);
     fd.append('user_label', user_label);
     fd.append('user_note', user_note);
-    const res = await fetch(`${API_BASE}/api/projects/${projectId}/assets/upload`, { method: 'POST', body: fd });
+    const res = await authFetch(`${API_BASE}/api/projects/${projectId}/assets/upload`, { method: 'POST', body: fd });
     if (!res.ok) throw new Error(await res.text());
     return res.json() as Promise<BackendAsset>;
   },
@@ -190,7 +245,7 @@ export const api = {
   getJob: (jobId: string) => request<BackendJob>(`/api/jobs/${jobId}`),
   getActiveJob: (projectId: string) => request<BackendJob | null>(`/api/projects/${projectId}/jobs/active`),
   watchJob: (jobId: string, onEvent: (job: BackendJob) => void) => {
-    const es = new EventSource(`${API_BASE}/api/jobs/${jobId}/events`);
+    const es = new EventSource(urlWithAccessToken(`/api/jobs/${jobId}/events`));
     es.onmessage = (ev) => {
       const data = JSON.parse(ev.data) as BackendJob;
       onEvent(data);
@@ -218,7 +273,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  fileUrl: (path: string) => `${API_BASE}${path}`,
+  fileUrl: (path: string) => urlWithAccessToken(path),
 };
 
 export function formatSize(bytes: number) {

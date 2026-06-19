@@ -106,6 +106,23 @@ curl http://127.0.0.1:8022/api/health
 
 剪映草稿由 `backend/app/draft_exporter.py` 从统一时间线同步生成。它包含可编辑主视频、字幕和信息图层；复杂 HyperFrames 浏览器动画不会被伪装成完整剪映原生反编译。
 
+## 对外访问安全
+
+新版后端默认启用访问口令。除 `/api/health` 外，项目、素材、聊天、生成、下载等 API 都需要访问口令：
+
+- 推荐显式设置：`FRAMECRAFT_ACCESS_TOKEN=<long-random-token> ./scripts/start-backend.sh`
+- 若未设置，后端会自动生成：`backend/storage/access_token.txt`
+- 前端首次遇到 401 会提示输入访问口令，并保存到当前浏览器 `localStorage`
+- 也可以通过 URL 临时传入：`http://<host>:5174/?access_token=<token>`
+
+默认 CORS 只允许 localhost 和常见局域网私有 IP 来源。如果部署到公网域名，请设置：
+
+```bash
+FRAMECRAFT_ALLOWED_ORIGINS=https://your-domain.example
+```
+
+公开 API 不会回传浏览器输入的 `api_key`，项目/素材/版本列表也不会回传服务端本机绝对路径。Codex CLI 的登录态由本机 Codex 管理，不通过前端 API 返回。
+
 ## Agent 工具
 
 每个 Codex 任务运行时会获得 `framecraft-tool.sh`，可调用：

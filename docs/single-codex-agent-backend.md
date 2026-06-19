@@ -71,6 +71,22 @@
 
 后端启动 Codex 时不得使用 `--dangerously-bypass-approvals-and-sandbox`。默认使用 `workspace-write` 沙盒，并把可写范围限制在 FrameCraft 项目根目录内，防止 agent 轻易读取或删改用户电脑上的无关文件。Agent 提示词还必须明确禁止主动读取其他 `proj_*` 的上传目录、输出目录、聊天记录或其他 job 工作目录。
 
+Web API 默认启用访问口令，保护项目、素材、生成、聊天、下载和设置接口：
+
+- `FRAMECRAFT_ACCESS_TOKEN` 存在时使用该环境变量。
+- 未设置时自动生成 `backend/storage/access_token.txt`。
+- 前端把口令放在 `X-FrameCraft-Token` 请求头中；视频、下载链接和 SSE 使用 `access_token` query 参数。
+- `/api/health` 保持公开，方便探活。
+- 可用 `FRAMECRAFT_DISABLE_AUTH=1` 临时关闭鉴权，但不要用于公网。
+- CORS 默认允许 localhost 和常见局域网私有 IP；公网域名部署时应设置 `FRAMECRAFT_ALLOWED_ORIGINS`。
+
+公开响应必须避免泄漏服务端内部信息：
+
+- `public_project` 不返回 `agent_session_id`。
+- `public_asset` 不返回本机 `path`。
+- `public_version` 不返回 `version_dir`、`preview_path`、`draft_path`、`draft_dir`、`import_guide_path`。
+- `/api/settings/model` 不返回或持久化浏览器提交的 `api_key`。
+
 `agent_tool.py` 也必须做二次路径校验：
 
 - `read_state` 只暴露当前项目的上传目录、输出目录和本项目聊天历史。
